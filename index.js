@@ -77,8 +77,8 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     });
 
-    // Add "other" to types
-    types.add('other');
+    // Add "Non-MBTI" to types
+    types.add('non-mbti');
 
     const sortedTypes = [...types].sort();
     const sortedKeywords = [...keywords].sort();
@@ -139,7 +139,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
                 if (activeType === 'type') {
                     sectionValue = section.dataset.type ? section.dataset.type.toLowerCase().trim() : '';
-                    if (activeValue === 'other') {
+                    if (activeValue === 'non-mbti') {
                         matches = !sectionValue.split(' ').some(t => t === activeValue);
                     } else {
                         matches = sectionValue.split(' ').includes(activeValue);
