@@ -60,120 +60,6 @@ header p {
     text-align: center;
 }
 
-header .art-process {
-    font-size: 1rem;
-    padding: 1.25rem;
-    border-radius: 12px;
-    background-color: #e0d7f7;
-    border: 2px solid #83b9cc;
-    margin: 0.75rem auto;
-    text-align: center;
-    font-style: normal;
-    color: #072539;
-    font-weight: 500;
-    text-shadow: none;
-    line-height: 2;
-    box-shadow: 0 4px 12px rgba(66, 142, 168, 0.2);
-    max-width: 60%;
-}
-
-.unbolded {
-    font-weight: normal;
-}
-
-.label-text {
-    font-size: 1rem;
-    font-style: normal;
-    color: #072539;
-    font-weight: 700;
-    line-height: 2;
-    display: inline;
-    background-color: transparent;
-}
-
-#result .result-text {
-    font-size: 1rem;
-    padding: 1.25rem;
-    border-radius: 12px;
-    background-color: #e0d7f7;
-    border: 2px solid #83b9cc;
-    margin: 0.75rem auto;
-    text-align: center;
-    font-style: normal;
-    color: #072539;
-    font-weight: 400;
-    text-shadow: 1px 1px 3px rgba(66, 142, 168, 0.3);
-    line-height: 2;
-    box-shadow: none;
-    max-width: 60%;
-    outline: none;
-    background-image: none;
-    background-clip: padding-box;
-    min-width: 0;
-    width: 100%;
-}
-
-#result {
-    background-color: transparent;
-    border: none;
-    padding: 0;
-    margin: 0;
-    overflow: hidden;
-    width: 100%;
-}
-
-#result p {
-    background-color: transparent;
-    border: none;
-    outline: none;
-    padding: 0;
-    margin: 0;
-}
-
-.result-spacing {
-    margin-top: 1rem;
-}
-
-.filter-container {
-    margin-bottom: 20px;
-    background-color: #4a2c72;
-    padding: 0.5rem;
-}
-
-.filter-container div {
-    margin: 10px 0;
-}
-
-.filter-container h4 {
-    padding: 0.5rem 1rem;
-    background-color: transparent;
-    margin-bottom: 0.5rem;
-    font-size: 0.85rem;
-    color: #e0d7f7;
-}
-
-.filter-container button {
-    margin: 5px;
-    padding: 8px 12px;
-    border: 1px solid #e0d7f7;
-    background-color: #331f50;
-    color: #e0d7f7;
-    cursor: pointer;
-    border-radius: 8px;
-    font-size: 0.9rem;
-    transition: background-color 0.2s, color 0.2s;
-}
-
-.filter-container button.active {
-    background-color: #83b9cc;
-    color: white;
-    border-color: #83b9cc;
-}
-
-.filter-container button:hover {
-    background-color: #ced4da;
-}
-
 .content-section {
     display: flex;
     flex-direction: column;
@@ -195,7 +81,7 @@ header .art-process {
 }
 
 .content-section p strong {
-    font-weight: 600; /* Keeps "Iterations:" bold */
+    font-weight: 600;
 }
 
 .info-box {
@@ -317,6 +203,24 @@ a {
     transition: background-color 0.2s, color 0.2s;
 }
 
+.section-buttons button[data-filter-type="type"],
+.section-buttons button[data-filter-type="meme"] {
+    background-color: #4a2c72;
+    color: #e0d7f7;
+    border-color: #4a2c72;
+}
+
+.section-buttons button[data-filter-type="type"]:hover,
+.section-buttons button[data-filter-type="meme"]:hover {
+    background-color: #5e3b83;
+    border-color: #5e3b83;
+}
+
+.section-buttons button[data-filter-type="keywords"] {
+    background-color: #5e3b83;
+    color: #e0d7f7;
+}
+
 .section-buttons button.active {
     background-color: #83b9cc;
     color: white;
@@ -325,6 +229,7 @@ a {
 
 .section-buttons button:hover {
     background-color: #ced4da;
+    color: #333;
 }
 
 .image-container {
@@ -442,62 +347,6 @@ footer a:hover {
         font-size: 0.9rem;
         padding: 0.8rem;
     }
-
-    header .art-process {
-        font-size: 0.85rem;
-        padding: 0.5rem 1rem;
-        margin: 0.5rem auto;
-        border-radius: 10px;
-        background-color: #e0d7f7;
-        border: 2px solid #83b9cc;
-        text-align: center;
-        font-style: normal;
-        color: #072539;
-        font-weight: 500;
-        text-shadow: none;
-        line-height: 2;
-        box-shadow: 0 4px 12px rgba(66, 142, 168, 0.2);
-        max-width: 85%;
-    }
-
-    #result .result-text {
-        font-size: 0.85rem;
-        padding: 0.5rem 1rem;
-        border-radius: 10px;
-        background-color: #e0d7f7;
-        border: 2px solid #83b9cc;
-        margin: 0.5rem auto;
-        text-align: center;
-        font-style: normal;
-        color: #072539;
-        font-weight: 400;
-        text-shadow: 1px 1px 3px rgba(66, 142, 168, 0.3);
-        line-height: 2;
-        box-shadow: none;
-        max-width: 85%;
-        outline: none;
-        background-image: none;
-        background-clip: padding-box;
-        min-width: 0;
-        width: 100%;
-    }
-
-    .result-spacing {
-        margin-top: 0.75rem;
-    }
-
-    .filter-container button {
-        padding: 6px 10px;
-        font-size: 0.8rem;
-    }
-
-    .filter-container h4 {
-        padding: 0.5rem 1rem;
-        background-color: transparent;
-        margin-bottom: 0.5rem;
-        font-size: 0.85rem;
-        color: #e0d7f7;
-    }
 }
 
 /* Tablet (600px - 1024px) */
@@ -526,14 +375,6 @@ footer a:hover {
         height: 30px;
     }
 
-    header .art-process {
-        max-width: 70%;
-    }
-
-    .label-text {
-        max-width: 70%;
-    }
-
     .info-box .smalltext {
         font-size: 0.65rem;
         margin: 0.25rem 0;
@@ -542,27 +383,5 @@ footer a:hover {
     .section-buttons button {
         padding: 6px 10px;
         font-size: 0.85rem;
-    }
-
-    #result .result-text {
-        max-width: 70%;
-        width: 100%;
-        background-clip: padding-box;
-        min-width: 0;
-        font-weight: 400;
-        text-shadow: 1px 1px 3px rgba(66, 142, 168, 0.3);
-    }
-
-    .filter-container button {
-        padding: 7px 11px;
-        font-size: 0.85rem;
-    }
-
-    .filter-container h4 {
-        padding: 0.5rem 1rem;
-        background-color: transparent;
-        margin-bottom: 0.5rem;
-        font-size: 0.85rem;
-        color: #e0d7f7;
     }
 }
