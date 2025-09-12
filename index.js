@@ -1,65 +1,73 @@
+function filterSections() {
+  const searchTerm = document.getElementById('search-bar').value.toLowerCase().trim();
+  const hasSpacesFilter = document.getElementById('has-spaces').checked;
+  const sections = document.querySelectorAll('.content-section');
 
-document.addEventListener('DOMContentLoaded', () => {
-    console.log('Script loaded at', new Date().toLocaleString('en-AU', { timeZone: 'Australia/Sydney' }));
+  sections.forEach(section => {
+    const type = section.dataset.type.toLowerCase().trim();
+    const keywordsStr = section.dataset.keywords.toLowerCase().trim();
 
-    const sections = document.querySelectorAll('.content-section');
-    console.log('Found sections:', sections.length, 'Details:', Array.from(sections).map(s => ({
-        outerHTML: s.outerHTML.slice(0, 100),
-        dataset: s.dataset
-    })));
+    // Parse keywords: Split by " to get phrases like ['dw sign won't...', 'memes', 'mbti', ...]
+    const keywords = keywordsStr ? keywordsStr.split('"').map(kw => kw.trim()).filter(kw => kw.length > 0) : [];
 
-    const containers = {
-        type: document.getElementById('type-buttons')
-    };
-    console.log('Container status:', Object.fromEntries(Object.entries(containers).map(([k, v]) => [k, v ? 'Present' : 'Missing'])));
+    // Check if section has any multi-word keyword
+    const hasMultiWord = keywords.some(kw => kw.includes(' '));
 
-    const dateLocale = 'en-AU';
-
-    const types = new Set();
-
-    function getGroup(value) {
-        const num = parseInt(value);
-        console.log(`getGroup('${value}') = ${num}`);
-        if (isNaN(num)) return 'none';
-        if (num < 50) return '<50';
-        if (num < 100) return '>50';
-        if (num < 200) return '>100';
-        return '>200';
+    // Search matching logic
+    let matchesSearch = false;
+    if (searchTerm === '') {
+      matchesSearch = true; // Show all if empty
+    } else if (searchTerm.includes(' ')) {
+      // Multi-word search: Exact match against any keyword phrase
+      matchesSearch = keywords.some(kw => kw === searchTerm);
+    } else {
+      // Singular search: Partial match against any keyword (handles "myers" in "myers briggs")
+      matchesSearch = type.includes(searchTerm) || keywords.some(kw => kw.includes(searchTerm));
     }
 
-    let hasTypes = false;
+    // Combine with has-spaces filter
+    const matchesSpaces = !hasSpacesFilter || hasMultiWord;
 
-    sections.forEach((section, idx) => {
-        console.log(`Processing section ${idx + 1} data:`, section.dataset);
-        if (section.dataset.type) section.dataset.type.split(' ').forEach(t => types.add(t));
-    });
+    // Show/hide
+    section.style.display = (matchesSearch && matchesSpaces) ? 'block' : 'none';
+  });
+}
 
-    const sortedTypes = [...types].sort();
+// Event listeners (attach on load)
+document.addEventListener('DOMContentLoaded', function() {
+  const searchBar = document.getElementById('search-bar');
+  const hasSpaces = document.getElementById('has-spaces');
+  if (searchBar) searchBar.addEventListener('input', filterSections);
+  if (hasSpaces) hasSpaces.addEventListener('change', filterSections);
+  // Initial filter run
+  filterSections();
+});
 
-    function createButtons(container, values, filterType) {
-        if (container) {
-            const allButton = document.createElement('button');
-            allButton.textContent = 'All';
-            allButton.dataset.filterType = filterType;
-            allButton.dataset.value = 'all';
-            allButton.addEventListener('click', () => filterSections(filterType, 'all'));
-            container.appendChild(allButton);
+// Optional: Dynamic buttons for MBTI (as before, but refined for multi-keywords)
+const mbtiTypes = ['ESTP', 'ISTP', 'ESFP', 'ISFP', 'ESFJ', 'ISFJ', 'ESTJ', 'ISTJ', 'ENFJ', 'INFJ', 'ENFP', 'INFP', 'ENTJ', 'INTJ', 'ENTP', 'INTP', 'Not MBTI Related'];
 
-            values.forEach(value => {
-                const button = document.createElement('button');
-                button.textContent = value;
-                button.dataset.filterType = filterType;
-                button.dataset.value = value;
-                button.addEventListener('click', () => filterSections(filterType, value));
-                container.appendChild(button);
-            });
+function addTypeButtons() {
+  const sections = document.querySelectorAll('.content-section');
+  sections.forEach(section => {
+    const buttonContainer = section.querySelector('.section-buttons');
+    if (buttonContainer) {
+      buttonContainer.innerHTML = ''; // Clear
+      mbtiTypes.forEach(type => {
+        const typeLower = type.toLowerCase();
+        if (section.dataset.type.toLowerCase() === typeLower || 
+            section.dataset.keywords.toLowerCase().includes(typeLower)) {
+          const button = document.createElement('button');
+          button.textContent = type;
+          button.addEventListener('click', () => {
+            document.getElementById('search-bar').value = type;
+            filterSections();
+          });
+          buttonContainer.appendChild(button);
         }
+      });
     }
+  });
+}
 
-    createButtons(containers.type, sortedTypes, 'type');
-
-    let currentFilters = {
-        type: 'all'
-    };
-
-    function filterSections(filterType, value) {
+// Run buttons on load
+document.addEventListener('DOMContentLoaded', addTypeButtons);
