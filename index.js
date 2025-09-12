@@ -45,7 +45,8 @@ document.addEventListener('DOMContentLoaded', () => {
                     const tTrimmed = t.trim();
                     if (tTrimmed) {
                         const typeLower = tTrimmed.toLowerCase();
-                        buttonData.push({ type: 'type', value: typeLower, label: `Type: ${tTrimmed}` });
+                        const typeUpper = tTrimmed.toUpperCase();
+                        buttonData.push({ type: 'type', value: typeLower, label: `Type: ${typeUpper}` });
                     }
                 });
             }
@@ -76,6 +77,9 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     });
 
+    // Add "other" to types
+    types.add('other');
+
     const sortedTypes = [...types].sort();
     const sortedKeywords = [...keywords].sort();
 
@@ -92,7 +96,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 // Guard against undefined value
                 if (value && typeof value === 'string') {
                     const button = document.createElement('button');
-                    button.textContent = value.charAt(0).toUpperCase() + value.slice(1);
+                    const displayText = (filterType === 'type') ? value.toUpperCase() : value.charAt(0).toUpperCase() + value.slice(1);
+                    button.textContent = displayText;
                     button.dataset.filterType = filterType;
                     button.dataset.value = value;
                     button.addEventListener('click', () => filterSections(filterType, value));
@@ -134,7 +139,11 @@ document.addEventListener('DOMContentLoaded', () => {
 
                 if (activeType === 'type') {
                     sectionValue = section.dataset.type ? section.dataset.type.toLowerCase().trim() : '';
-                    matches = sectionValue.split(' ').includes(activeValue);
+                    if (activeValue === 'other') {
+                        matches = !sectionValue.split(' ').some(t => t === activeValue);
+                    } else {
+                        matches = sectionValue.split(' ').includes(activeValue);
+                    }
                 } else if (activeType === 'keyword') {
                     sectionValue = section.dataset.keywords ? section.dataset.keywords.toLowerCase().trim() : '';
                     // Parse keywords for matching
