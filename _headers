@@ -1,0 +1,26 @@
+/*
+
+Content-Security-Policy: default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' https://edits.apah.art https://apah.art data:; object-src 'none'; base-uri 'self'; form-action 'self'; frame-src https://apahedits.pages.dev https://edits.apah.art https://apah.art;
+
+X-Content-Type-Options: nosniff
+X-Frame-Options: ALLOW-FROM https://apahedits.pages.dev https://edits.apah.art https://apah.art
+Strict-Transport-Security: max-age=31536000; includeSubDomains; preload
+Referrer-Policy: strict-origin-when-cross-origin
+Permissions-Policy: geolocation=(), camera=(), microphone=(), payment=(), usb=(), xr-spatial-tracking=()
+Cross-Origin-Embedder-Policy: unsafe-none
+Cross-Origin-Opener-Policy: same-origin-allow-popups
+Cross-Origin-Resource-Policy: cross-origin
+X-Permitted-Cross-Domain-Policies: none
+
+/static/images/*.jpg
+/static/images/*.png
+/static/images/*.gif
+/static/images/*.webp
+  Cache-Control: public, max-age=86400
+
+/static/*.css
+/static/*.js
+  Cache-Control: public, max-age=86400
+
+/secure/*
+  Cache-Control: no-store, no-cache, must-revalidate
