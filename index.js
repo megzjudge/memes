@@ -9,13 +9,13 @@ document.addEventListener('DOMContentLoaded', () => {
 
     const containers = {
         type: document.getElementById('type-buttons'),
-        keyword: document.getElementById('keyword-buttons'),
-        meme: document.getElementById('meme-buttons')
+        meme: document.getElementById('meme-buttons'),
+        keywords: document.getElementById('keywords-buttons')
     };
     console.log('Container status:', Object.fromEntries(Object.entries(containers).map(([k, v]) => [k, v ? 'Present' : 'Missing'])));
 
     const types = new Set();
-    const keywords = new Set();
+    const keywordsSet = new Set();
     const memes = new Set();
 
     sections.forEach((section, idx) => {
@@ -34,7 +34,7 @@ document.addEventListener('DOMContentLoaded', () => {
             const keywordsArray = keywordsStr.split(',')
                 .map(kw => kw.trim())
                 .filter(kw => kw.length > 0);
-            keywordsArray.forEach(kw => keywords.add(kw));
+            keywordsArray.forEach(kw => keywordsSet.add(kw));
         }
         if (section.dataset.meme) {
             // Parse meme safely
@@ -57,7 +57,15 @@ document.addEventListener('DOMContentLoaded', () => {
                     }
                 });
             }
-            // Add keyword buttons
+            // Add meme button
+            if (section.dataset.meme) {
+                const memeStr = section.dataset.meme.trim();
+                const memeLower = memeStr.toLowerCase().trim();
+                if (memeLower) {
+                    buttonData.push({ type: 'meme', value: memeLower, label: `Meme: ${memeStr}` });
+                }
+            }
+            // Add keywords buttons (no "Keyword:" prefix)
             if (section.dataset.keywords) {
                 const keywordsStr = section.dataset.keywords.trim();
                 const keywordsArray = keywordsStr.split(',')
@@ -66,17 +74,9 @@ document.addEventListener('DOMContentLoaded', () => {
                 keywordsArray.forEach(kw => {
                     const kwLower = kw.toLowerCase().trim();
                     if (kwLower) {
-                        buttonData.push({ type: 'keyword', value: kwLower, label: `Keyword: ${kw}` });
+                        buttonData.push({ type: 'keywords', value: kwLower, label: `${kw}` });
                     }
                 });
-            }
-            // Add meme button
-            if (section.dataset.meme) {
-                const memeStr = section.dataset.meme.trim();
-                const memeLower = memeStr.toLowerCase().trim();
-                if (memeLower) {
-                    buttonData.push({ type: 'meme', value: memeLower, label: `Meme: ${memeStr}` });
-                }
             }
 
             if (buttonData.length) {
@@ -96,7 +96,7 @@ document.addEventListener('DOMContentLoaded', () => {
     types.add('non-mbti');
 
     const sortedTypes = [...types].sort();
-    const sortedKeywords = [...keywords].sort();
+    const sortedKeywords = [...keywordsSet].sort();
     const sortedMemes = [...memes].sort();
 
     function createButtons(container, values, filterType) {
@@ -124,13 +124,13 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     createButtons(containers.type, sortedTypes, 'type');
-    createButtons(containers.keyword, sortedKeywords, 'keyword');
     createButtons(containers.meme, sortedMemes, 'meme');
+    createButtons(containers.keywords, sortedKeywords, 'keywords');
 
     let currentFilters = {
         type: 'all',
-        keyword: 'all',
-        meme: 'all'
+        meme: 'all',
+        keywords: 'all'
     };
 
     function filterSections(filterType, value) {
@@ -162,7 +162,10 @@ document.addEventListener('DOMContentLoaded', () => {
                     } else {
                         matches = sectionValue.split(' ').includes(activeValue);
                     }
-                } else if (activeType === 'keyword') {
+                } else if (activeType === 'meme') {
+                    sectionValue = section.dataset.meme ? section.dataset.meme.toLowerCase().trim() : '';
+                    matches = sectionValue === activeValue;
+                } else if (activeType === 'keywords') {
                     sectionValue = section.dataset.keywords ? section.dataset.keywords.toLowerCase().trim() : '';
                     // Parse keywords for matching: Split on commas
                     const keywordsArray = sectionValue.split(',')
@@ -176,9 +179,6 @@ document.addEventListener('DOMContentLoaded', () => {
                     } else {
                         matches = false;
                     }
-                } else if (activeType === 'meme') {
-                    sectionValue = section.dataset.meme ? section.dataset.meme.toLowerCase().trim() : '';
-                    matches = sectionValue === activeValue;
                 }
                 console.log(`Checking ${activeType}='${activeValue}' against section value='${sectionValue}': ${matches}`);
             }
