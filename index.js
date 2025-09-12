@@ -9,12 +9,14 @@ document.addEventListener('DOMContentLoaded', () => {
 
     const containers = {
         type: document.getElementById('type-buttons'),
-        keyword: document.getElementById('keyword-buttons')
+        keyword: document.getElementById('keyword-buttons'),
+        meme: document.getElementById('meme-buttons')
     };
     console.log('Container status:', Object.fromEntries(Object.entries(containers).map(([k, v]) => [k, v ? 'Present' : 'Missing'])));
 
     const types = new Set();
     const keywords = new Set();
+    const memes = new Set();
 
     sections.forEach((section, idx) => {
         console.log(`Processing section ${idx + 1} data:`, section.dataset);
@@ -27,12 +29,17 @@ document.addEventListener('DOMContentLoaded', () => {
             });
         }
         if (section.dataset.keywords) {
-            // Parse keywords safely
+            // Parse keywords safely: Split on commas for easy typing
             const keywordsStr = section.dataset.keywords.toString().toLowerCase().trim();
-            const keywordsArray = keywordsStr.split('"')
+            const keywordsArray = keywordsStr.split(',')
                 .map(kw => kw.trim())
                 .filter(kw => kw.length > 0);
             keywordsArray.forEach(kw => keywords.add(kw));
+        }
+        if (section.dataset.meme) {
+            // Parse meme safely
+            const memeStr = section.dataset.meme.toString().toLowerCase().trim();
+            if (memeStr) memes.add(memeStr);
         }
 
         const buttonsContainer = section.querySelector('.section-buttons');
@@ -53,7 +60,7 @@ document.addEventListener('DOMContentLoaded', () => {
             // Add keyword buttons
             if (section.dataset.keywords) {
                 const keywordsStr = section.dataset.keywords.trim();
-                const keywordsArray = keywordsStr.split('"')
+                const keywordsArray = keywordsStr.split(',')
                     .map(kw => kw.trim())
                     .filter(kw => kw.length > 0);
                 keywordsArray.forEach(kw => {
@@ -62,6 +69,14 @@ document.addEventListener('DOMContentLoaded', () => {
                         buttonData.push({ type: 'keyword', value: kwLower, label: `Keyword: ${kw}` });
                     }
                 });
+            }
+            // Add meme button
+            if (section.dataset.meme) {
+                const memeStr = section.dataset.meme.trim();
+                const memeLower = memeStr.toLowerCase().trim();
+                if (memeLower) {
+                    buttonData.push({ type: 'meme', value: memeLower, label: `Meme: ${memeStr}` });
+                }
             }
 
             if (buttonData.length) {
@@ -82,6 +97,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     const sortedTypes = [...types].sort();
     const sortedKeywords = [...keywords].sort();
+    const sortedMemes = [...memes].sort();
 
     function createButtons(container, values, filterType) {
         if (container) {
@@ -109,10 +125,12 @@ document.addEventListener('DOMContentLoaded', () => {
 
     createButtons(containers.type, sortedTypes, 'type');
     createButtons(containers.keyword, sortedKeywords, 'keyword');
+    createButtons(containers.meme, sortedMemes, 'meme');
 
     let currentFilters = {
         type: 'all',
-        keyword: 'all'
+        keyword: 'all',
+        meme: 'all'
     };
 
     function filterSections(filterType, value) {
@@ -146,8 +164,8 @@ document.addEventListener('DOMContentLoaded', () => {
                     }
                 } else if (activeType === 'keyword') {
                     sectionValue = section.dataset.keywords ? section.dataset.keywords.toLowerCase().trim() : '';
-                    // Parse keywords for matching
-                    const keywordsArray = sectionValue.split('"')
+                    // Parse keywords for matching: Split on commas
+                    const keywordsArray = sectionValue.split(',')
                         .map(kw => kw.trim())
                         .filter(kw => kw.length > 0);
                     // For singular/multi: if activeValue has spaces, exact match; else partial
@@ -158,6 +176,9 @@ document.addEventListener('DOMContentLoaded', () => {
                     } else {
                         matches = false;
                     }
+                } else if (activeType === 'meme') {
+                    sectionValue = section.dataset.meme ? section.dataset.meme.toLowerCase().trim() : '';
+                    matches = sectionValue === activeValue;
                 }
                 console.log(`Checking ${activeType}='${activeValue}' against section value='${sectionValue}': ${matches}`);
             }
