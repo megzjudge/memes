@@ -217,7 +217,14 @@ a {
 }
 
 .section-buttons button[data-filter-type="keywords"] {
-    background-color: #5e3b83;
+    background-color: #7C5CBF;
+    color: #e0d7f7;
+    border-color: #7C5CBF;
+}
+
+.section-buttons button[data-filter-type="keywords"]:hover {
+    background-color: #8E6DD1;
+    border-color: #8E6DD1;
     color: #e0d7f7;
 }
 
