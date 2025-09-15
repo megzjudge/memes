@@ -92,7 +92,8 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     });
 
-    // Add "Non-MBTI" to types
+    const mbtiTypes = new Set(['estp', 'istp', 'esfp', 'isfp', 'estj', 'istj', 'esfj', 'isfj', 'enfp', 'infp', 'enfj', 'infj', 'entj', 'intj', 'entp', 'intp']);
+    mbtiTypes.forEach(t => types.add(t));
     types.add('non-mbti');
 
     const sortedTypes = [...types].sort();
@@ -112,7 +113,16 @@ document.addEventListener('DOMContentLoaded', () => {
                 // Guard against undefined value
                 if (value && typeof value === 'string') {
                     const button = document.createElement('button');
-                    const displayText = (filterType === 'type') ? value.toUpperCase() : value.charAt(0).toUpperCase() + value.slice(1);
+                    let displayText;
+                    if (filterType === 'type') {
+                        if (value === 'non-mbti') {
+                            displayText = 'non-mbti';
+                        } else {
+                            displayText = value.toUpperCase();
+                        }
+                    } else {
+                        displayText = value.charAt(0).toUpperCase() + value.slice(1);
+                    }
                     button.textContent = displayText;
                     button.dataset.filterType = filterType;
                     button.dataset.value = value;
@@ -158,7 +168,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 if (activeType === 'type') {
                     sectionValue = section.dataset.type ? section.dataset.type.toLowerCase().trim() : '';
                     if (activeValue === 'non-mbti') {
-                        matches = !sectionValue.split(' ').some(t => t === activeValue);
+                        matches = !sectionValue.split(' ').some(t => mbtiTypes.has(t));
                     } else {
                         matches = sectionValue.split(' ').includes(activeValue);
                     }
