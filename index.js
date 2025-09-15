@@ -21,15 +21,15 @@ document.addEventListener('DOMContentLoaded', () => {
     sections.forEach((section, idx) => {
         console.log(`Processing section ${idx + 1} data:`, section.dataset);
         if (section.dataset.type) {
-            // Guard against undefined in split
-            const typeStr = section.dataset.type.toString().toLowerCase().trim();
-            typeStr.split(' ').forEach(t => {
+            // Handle comma-separated types with spaces
+            const typeStr = section.dataset.type.toString().toUpperCase().trim();
+            typeStr.split(/[\s,]+/).forEach(t => {
                 const trimmedT = t.trim();
                 if (trimmedT) types.add(trimmedT);
             });
         }
         if (section.dataset.keywords) {
-            // Parse keywords safely: Split on commas for easy typing
+            // Parse keywords safely: Split on commas, force lowercase
             const keywordsStr = section.dataset.keywords.toString().toLowerCase().trim();
             const keywordsArray = keywordsStr.split(',')
                 .map(kw => kw.trim())
@@ -37,7 +37,7 @@ document.addEventListener('DOMContentLoaded', () => {
             keywordsArray.forEach(kw => keywordsSet.add(kw));
         }
         if (section.dataset.meme) {
-            // Parse meme safely
+            // Parse meme safely, force lowercase
             const memeStr = section.dataset.meme.toString().toLowerCase().trim();
             if (memeStr) memes.add(memeStr);
         }
@@ -48,33 +48,30 @@ document.addEventListener('DOMContentLoaded', () => {
             // Add type buttons
             if (section.dataset.type) {
                 const typeStr = section.dataset.type.trim();
-                typeStr.split(' ').forEach(t => {
+                typeStr.split(/[\s,]+/).forEach(t => {
                     const tTrimmed = t.trim();
                     if (tTrimmed) {
-                        const typeLower = tTrimmed.toLowerCase();
                         const typeUpper = tTrimmed.toUpperCase();
-                        buttonData.push({ type: 'type', value: typeLower, label: `Type: ${typeUpper}` });
+                        buttonData.push({ type: 'type', value: typeUpper, label: `Type: ${typeUpper}` });
                     }
                 });
             }
             // Add meme button
             if (section.dataset.meme) {
-                const memeStr = section.dataset.meme.trim();
-                const memeLower = memeStr.toLowerCase().trim();
-                if (memeLower) {
-                    buttonData.push({ type: 'meme', value: memeLower, label: `Meme: ${memeStr}` });
+                const memeStr = section.dataset.meme.toLowerCase().trim();
+                if (memeStr) {
+                    buttonData.push({ type: 'meme', value: memeStr, label: memeStr });
                 }
             }
-            // Add keywords buttons (no "Keyword:" prefix)
+            // Add keywords buttons
             if (section.dataset.keywords) {
-                const keywordsStr = section.dataset.keywords.trim();
+                const keywordsStr = section.dataset.keywords.toLowerCase().trim();
                 const keywordsArray = keywordsStr.split(',')
                     .map(kw => kw.trim())
                     .filter(kw => kw.length > 0);
                 keywordsArray.forEach(kw => {
-                    const kwLower = kw.toLowerCase().trim();
-                    if (kwLower) {
-                        buttonData.push({ type: 'keywords', value: kwLower, label: `${kw}` });
+                    if (kw) {
+                        buttonData.push({ type: 'keywords', value: kw, label: kw });
                     }
                 });
             }
@@ -92,9 +89,10 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     });
 
-    const mbtiTypes = new Set(['estp', 'istp', 'esfp', 'isfp', 'estj', 'istj', 'esfj', 'isfj', 'enfp', 'infp', 'enfj', 'infj', 'entj', 'intj', 'entp', 'intp']);
+    const mbtiTypes = new Set(['ESTP', 'ISTP', 'ESFP', 'ISFP', 'ESTJ', 'ISTJ', 'ESFJ', 'ISFJ', 'ENFP', 'INFP', 'ENFJ', 'INFJ', 'ENTJ', 'INTJ', 'ENTP', 'INTP']);
     mbtiTypes.forEach(t => types.add(t));
     types.add('non-mbti');
+    types.add('All');
 
     const sortedTypes = [...types].sort();
     const sortedKeywords = [...keywordsSet].sort();
@@ -110,18 +108,13 @@ document.addEventListener('DOMContentLoaded', () => {
             container.appendChild(allButton);
 
             values.forEach(value => {
-                // Guard against undefined value
                 if (value && typeof value === 'string') {
                     const button = document.createElement('button');
                     let displayText;
                     if (filterType === 'type') {
-                        if (value === 'non-mbti') {
-                            displayText = 'non-mbti';
-                        } else {
-                            displayText = value.toUpperCase();
-                        }
+                        displayText = value === 'non-mbti' || value === 'All' ? value : value.toUpperCase();
                     } else {
-                        displayText = value.charAt(0).toUpperCase() + value.slice(1);
+                        displayText = value; // Already lowercase for meme and keywords
                     }
                     button.textContent = displayText;
                     button.dataset.filterType = filterType;
@@ -150,38 +143,38 @@ document.addEventListener('DOMContentLoaded', () => {
 
         // Update button active states for this filter type
         document.querySelectorAll(`button[data-filter-type="${filterType}"]`).forEach(btn => {
-            const btnValue = btn.dataset.value; // Safe access
+            const btnValue = btn.dataset.value;
             const isActive = btnValue === currentFilters[filterType] && currentFilters[filterType] !== 'all';
             btn.classList.toggle('active', isActive);
             btn.setAttribute('aria-pressed', isActive);
         });
 
         sections.forEach(section => {
-            section.classList.remove('hidden'); // Start with all visible
+            section.classList.remove('hidden');
             const activeFilter = Object.entries(currentFilters).find(([key, val]) => val !== 'all');
-            let matches = !activeFilter; // Default to true if no active filter
+            let matches = !activeFilter;
 
             if (activeFilter) {
                 const [activeType, activeValue] = activeFilter;
                 let sectionValue;
 
                 if (activeType === 'type') {
-                    sectionValue = section.dataset.type ? section.dataset.type.toLowerCase().trim() : '';
+                    sectionValue = section.dataset.type ? section.dataset.type.toUpperCase().trim() : '';
                     if (activeValue === 'non-mbti') {
-                        matches = !sectionValue.split(' ').some(t => mbtiTypes.has(t));
+                        matches = !sectionValue.split(/[\s,]+/).some(t => mbtiTypes.has(t));
+                    } else if (activeValue === 'All') {
+                        matches = true;
                     } else {
-                        matches = sectionValue.split(' ').includes(activeValue);
+                        matches = sectionValue.split(/[\s,]+/).includes(activeValue);
                     }
                 } else if (activeType === 'meme') {
                     sectionValue = section.dataset.meme ? section.dataset.meme.toLowerCase().trim() : '';
                     matches = sectionValue === activeValue;
                 } else if (activeType === 'keywords') {
                     sectionValue = section.dataset.keywords ? section.dataset.keywords.toLowerCase().trim() : '';
-                    // Parse keywords for matching: Split on commas
                     const keywordsArray = sectionValue.split(',')
                         .map(kw => kw.trim())
                         .filter(kw => kw.length > 0);
-                    // For singular/multi: if activeValue has spaces, exact match; else partial
                     if (activeValue && activeValue.includes(' ')) {
                         matches = keywordsArray.some(kw => kw === activeValue);
                     } else if (activeValue) {
