@@ -1,3 +1,4 @@
+```css
 * {
     box-sizing: border-box;
     margin: 0;
@@ -250,15 +251,15 @@ a {
 
 .section-buttons button[data-filter-type="type"],
 .section-buttons button[data-filter-type="meme"] {
-    background-color: #4a2c72;
+    background-color: #5e3b83;
     color: #e0d7f7;
-    border-color: #4a2c72;
+    border-color: #5e3b83;
 }
 
 .section-buttons button[data-filter-type="type"]:hover,
 .section-buttons button[data-filter-type="meme"]:hover {
-    background-color: #5e3b83;
-    border-color: #5e3b83;
+    background-color: #4a2c72;
+    border-color: #4a2c72;
 }
 
 .section-buttons button[data-filter-type="keywords"] {
@@ -447,3 +448,4 @@ footer a:hover {
         font-size: 0.85rem;
     }
 }
+```
