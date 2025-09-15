@@ -21,11 +21,15 @@ document.addEventListener('DOMContentLoaded', () => {
     sections.forEach((section, idx) => {
         console.log(`Processing section ${idx + 1} data:`, section.dataset);
         if (section.dataset.type) {
-            // Handle comma-separated types with spaces
-            const typeStr = section.dataset.type.toString().toUpperCase().trim();
+            // Handle comma-separated types with spaces, force lowercase
+            const typeStr = section.dataset.type.toString().toLowerCase().trim();
             typeStr.split(/[\s,]+/).forEach(t => {
                 const trimmedT = t.trim();
-                if (trimmedT) types.add(trimmedT);
+                if (trimmedT) {
+                    // Standardize 'non-mbti' and 'NON-MBTI' to 'non-mbti'
+                    const normalizedT = trimmedT.toLowerCase() === 'non-mbti' ? 'non-mbti' : trimmedT;
+                    types.add(normalizedT);
+                }
             });
         }
         if (section.dataset.keywords) {
@@ -47,12 +51,12 @@ document.addEventListener('DOMContentLoaded', () => {
             const buttonData = [];
             // Add type buttons
             if (section.dataset.type) {
-                const typeStr = section.dataset.type.trim();
+                const typeStr = section.dataset.type.toLowerCase().trim();
                 typeStr.split(/[\s,]+/).forEach(t => {
                     const tTrimmed = t.trim();
                     if (tTrimmed) {
-                        const typeUpper = tTrimmed.toUpperCase();
-                        buttonData.push({ type: 'type', value: typeUpper, label: `Type: ${typeUpper}` });
+                        const typeLower = tTrimmed.toLowerCase() === 'non-mbti' ? 'non-mbti' : tTrimmed.toLowerCase();
+                        buttonData.push({ type: 'type', value: typeLower, label: `type: ${typeLower}` });
                     }
                 });
             }
@@ -89,10 +93,10 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     });
 
-    const mbtiTypes = new Set(['ESTP', 'ISTP', 'ESFP', 'ISFP', 'ESTJ', 'ISTJ', 'ESFJ', 'ISFJ', 'ENFP', 'INFP', 'ENFJ', 'INFJ', 'ENTJ', 'INTJ', 'ENTP', 'INTP']);
+    const mbtiTypes = new Set(['estp', 'istp', 'esfp', 'isfp', 'estj', 'istj', 'esfj', 'isfj', 'enfp', 'infp', 'enfj', 'infj', 'entj', 'intj', 'entp', 'intp']);
     mbtiTypes.forEach(t => types.add(t));
     types.add('non-mbti');
-    types.add('All');
+    types.add('all');
 
     const sortedTypes = [...types].sort();
     const sortedKeywords = [...keywordsSet].sort();
@@ -101,7 +105,7 @@ document.addEventListener('DOMContentLoaded', () => {
     function createButtons(container, values, filterType) {
         if (container) {
             const allButton = document.createElement('button');
-            allButton.textContent = 'All';
+            allButton.textContent = 'all';
             allButton.dataset.filterType = filterType;
             allButton.dataset.value = 'all';
             allButton.addEventListener('click', () => filterSections(filterType, 'all'));
@@ -112,7 +116,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     const button = document.createElement('button');
                     let displayText;
                     if (filterType === 'type') {
-                        displayText = value === 'non-mbti' || value === 'All' ? value : value.toUpperCase();
+                        displayText = value.toLowerCase(); // Ensure lowercase for type buttons
                     } else {
                         displayText = value; // Already lowercase for meme and keywords
                     }
@@ -159,10 +163,10 @@ document.addEventListener('DOMContentLoaded', () => {
                 let sectionValue;
 
                 if (activeType === 'type') {
-                    sectionValue = section.dataset.type ? section.dataset.type.toUpperCase().trim() : '';
+                    sectionValue = section.dataset.type ? section.dataset.type.toLowerCase().trim() : '';
                     if (activeValue === 'non-mbti') {
                         matches = !sectionValue.split(/[\s,]+/).some(t => mbtiTypes.has(t));
-                    } else if (activeValue === 'All') {
+                    } else if (activeValue === 'all') {
                         matches = true;
                     } else {
                         matches = sectionValue.split(/[\s,]+/).includes(activeValue);
