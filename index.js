@@ -18,22 +18,76 @@ document.addEventListener('DOMContentLoaded', () => {
     const keywordsSet = new Set();
     const memes = new Set();
 
+    // Fetch stats from Worker
+    async function fetchMemeStats(memeId) {
+        try {
+            const response = await fetch(`https://imgflip-stats.your-account.workers.dev/stats?memeId=${memeId}`);
+            if (!response.ok) {
+                throw new Error(`HTTP error! Status: ${response.status}`);
+            }
+            const data = await response.json();
+            if (!data.success) {
+                throw new Error(data.error || 'API returned failure');
+            }
+            return data.data;
+        } catch (error) {
+            console.error(`Error fetching stats for meme ${memeId}:`, error);
+            return { views: 0, upvotes: 0, date: 'N/A' };
+        }
+    }
+
+    // Update sections with stats buttons
+    async function updateMemeStats() {
+        for (const section of sections) {
+            const linkEl = section.querySelector('.image-links a[href]');
+            if (linkEl && linkEl.href) {
+                const urlMatch = linkEl.href.match(/imgflip\.com\/i\/([a-zA-Z0-9]+)/);
+                if (urlMatch) {
+                    const memeId = urlMatch[1];
+                    section.dataset.memeId = memeId;
+                    console.log(`Extracted ID ${memeId} for section:`, section.querySelector('h3').textContent);
+
+                    const stats = await fetchMemeStats(memeId);
+                    const buttonsContainer = section.querySelector('.section-buttons');
+
+                    // Create stats buttons
+                    const statsButtons = [
+                        { label: `Views: ${stats.views.toLocaleString()}`, type: 'views' },
+                        { label: `Upvotes: ${stats.upvotes}`, type: 'upvotes' },
+                        { label: `Created: ${stats.date !== 'N/A' ? new Date(stats.date).toLocaleDateString('en-AU') : 'N/A'}`, type: 'date' }
+                    ];
+
+                    statsButtons.forEach(stat => {
+                        const button = document.createElement('button');
+                        button.textContent = stat.label;
+                        button.dataset.statType = stat.type;
+                        button.classList.add('stat-button');
+                        button.disabled = true; // Read-only
+                        button.addEventListener('click', () => console.log(`Stat clicked: ${stat.type} = ${button.textContent}`));
+                        buttonsContainer.appendChild(button);
+                    });
+                } else {
+                    console.warn('No valid ID in URL:', linkEl.href);
+                }
+            } else {
+                console.log('No Imgflip link found for section:', section.querySelector('h3').textContent);
+            }
+        }
+    }
+
     sections.forEach((section, idx) => {
         console.log(`Processing section ${idx + 1} data:`, section.dataset);
         if (section.dataset.type) {
-            // Handle comma-separated types with spaces, force lowercase
             const typeStr = section.dataset.type.toString().toLowerCase().trim();
             typeStr.split(/[\s,]+/).forEach(t => {
                 const trimmedT = t.trim();
                 if (trimmedT) {
-                    // Standardize 'non-mbti' and 'NON-MBTI' to 'non-mbti'
                     const normalizedT = trimmedT.toLowerCase() === 'non-mbti' ? 'non-mbti' : trimmedT;
                     types.add(normalizedT);
                 }
             });
         }
         if (section.dataset.keywords) {
-            // Parse keywords safely: Split on commas, force lowercase
             const keywordsStr = section.dataset.keywords.toString().toLowerCase().trim();
             const keywordsArray = keywordsStr.split(',')
                 .map(kw => kw.trim())
@@ -41,7 +95,6 @@ document.addEventListener('DOMContentLoaded', () => {
             keywordsArray.forEach(kw => keywordsSet.add(kw));
         }
         if (section.dataset.meme) {
-            // Parse meme safely, force lowercase
             const memeStr = section.dataset.meme.toString().toLowerCase().trim();
             if (memeStr) memes.add(memeStr);
         }
@@ -49,7 +102,6 @@ document.addEventListener('DOMContentLoaded', () => {
         const buttonsContainer = section.querySelector('.section-buttons');
         if (buttonsContainer) {
             const buttonData = [];
-            // Add type buttons
             if (section.dataset.type) {
                 const typeStr = section.dataset.type.toLowerCase().trim();
                 typeStr.split(/[\s,]+/).forEach(t => {
@@ -60,14 +112,12 @@ document.addEventListener('DOMContentLoaded', () => {
                     }
                 });
             }
-            // Add meme button
             if (section.dataset.meme) {
                 const memeStr = section.dataset.meme.toLowerCase().trim();
                 if (memeStr) {
                     buttonData.push({ type: 'meme', value: memeStr, label: memeStr });
                 }
             }
-            // Add keywords buttons
             if (section.dataset.keywords) {
                 const keywordsStr = section.dataset.keywords.toLowerCase().trim();
                 const keywordsArray = keywordsStr.split(',')
@@ -116,9 +166,9 @@ document.addEventListener('DOMContentLoaded', () => {
                     const button = document.createElement('button');
                     let displayText;
                     if (filterType === 'type') {
-                        displayText = value.toLowerCase(); // Ensure lowercase for type buttons
+                        displayText = value.toLowerCase();
                     } else {
-                        displayText = value; // Already lowercase for meme and keywords
+                        displayText = value;
                     }
                     button.textContent = displayText;
                     button.dataset.filterType = filterType;
@@ -145,7 +195,6 @@ document.addEventListener('DOMContentLoaded', () => {
         currentFilters[filterType] = value === currentFilters[filterType] ? 'all' : value;
         console.log('Current filters:', currentFilters);
 
-        // Update button active states for this filter type
         document.querySelectorAll(`button[data-filter-type="${filterType}"]`).forEach(btn => {
             const btnValue = btn.dataset.value;
             const isActive = btnValue === currentFilters[filterType] && currentFilters[filterType] !== 'all';
@@ -194,6 +243,7 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
-    // Initialize all filters to 'all'
+    // Initialize filters and fetch stats
     Object.keys(currentFilters).forEach(filter => filterSections(filter, 'all'));
+    updateMemeStats();
 });
