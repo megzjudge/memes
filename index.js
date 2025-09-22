@@ -108,7 +108,8 @@ document.addEventListener('DOMContentLoaded', () => {
                     const tTrimmed = t.trim();
                     if (tTrimmed) {
                         const typeLower = tTrimmed.toLowerCase() === 'non-mbti' ? 'non-mbti' : tTrimmed.toLowerCase();
-                        buttonData.push({ type: 'type', value: typeLower, label: `type: ${typeLower}` });
+                        const displayLabel = typeLower === 'non-mbti' ? 'Non-MBTI' : typeLower.toUpperCase();
+                        buttonData.push({ type: 'type', value: typeLower, label: `type: ${displayLabel}` });
                     }
                 });
             }
@@ -166,7 +167,13 @@ document.addEventListener('DOMContentLoaded', () => {
                     const button = document.createElement('button');
                     let displayText;
                     if (filterType === 'type') {
-                        displayText = value.toLowerCase();
+                        if (value === 'all') {
+                            displayText = 'all';
+                        } else if (value === 'non-mbti') {
+                            displayText = 'Non-MBTI';
+                        } else {
+                            displayText = value.toUpperCase();
+                        }
                     } else {
                         displayText = value;
                     }
