@@ -1,18 +1,11 @@
 document.addEventListener('DOMContentLoaded', () => {
-    console.log('Script loaded at', new Date().toLocaleString('en-AU', { timeZone: 'Australia/Sydney' }));
-
     const sections = document.querySelectorAll('.content-section');
-    console.log('Found sections:', sections.length, 'Details:', Array.from(sections).map(s => ({
-        outerHTML: s.outerHTML.slice(0, 100),
-        dataset: s.dataset
-    })));
 
     const containers = {
         type: document.getElementById('type-buttons'),
         meme: document.getElementById('meme-buttons'),
         keywords: document.getElementById('keywords-buttons')
     };
-    console.log('Container status:', Object.fromEntries(Object.entries(containers).map(([k, v]) => [k, v ? 'Present' : 'Missing'])));
 
     const types = new Set();
     const keywordsSet = new Set();
@@ -36,66 +29,63 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
-    // Update sections with stats buttons
+    // Update sections with stats buttons (optimized with parallel fetches)
     async function updateMemeStats() {
-        for (const section of sections) {
+        const fetchTasks = [];
+
+        sections.forEach(section => {
             const linkEl = section.querySelector('.image-links a[href]');
             if (linkEl && linkEl.href) {
                 const urlMatch = linkEl.href.match(/imgflip\.com\/i\/([a-zA-Z0-9]+)/);
                 if (urlMatch) {
                     const memeId = urlMatch[1];
                     section.dataset.memeId = memeId;
-                    console.log(`Extracted ID ${memeId} for section:`, section.querySelector('h3').textContent);
 
-                    const stats = await fetchMemeStats(memeId);
                     const buttonsContainer = section.querySelector('.section-buttons');
+                    const loader = document.createElement('div');
+                    loader.classList.add('loader');
+                    buttonsContainer.appendChild(loader);
 
-                    // Create stats buttons
-                    const statsButtons = [
-                        { label: `Views: ${stats.views.toLocaleString()}`, type: 'views' },
-                        { label: `Upvotes: ${stats.upvotes}`, type: 'upvotes' },
-                        { label: `Created: ${stats.date !== 'N/A' ? new Date(stats.date).toLocaleDateString('en-AU') : 'N/A'}`, type: 'date' }
-                    ];
-
-                    statsButtons.forEach(stat => {
-                        const button = document.createElement('button');
-                        button.textContent = stat.label;
-                        button.dataset.statType = stat.type;
-                        button.classList.add('stat-button');
-                        button.disabled = true; // Read-only
-                        button.addEventListener('click', () => console.log(`Stat clicked: ${stat.type} = ${button.textContent}`));
-                        buttonsContainer.appendChild(button);
-                    });
-                } else {
-                    console.warn('No valid ID in URL:', linkEl.href);
+                    fetchTasks.push(
+                        fetchMemeStats(memeId).then(stats => ({ section, stats, buttonsContainer, loader }))
+                    );
                 }
-            } else {
-                console.log('No Imgflip link found for section:', section.querySelector('h3').textContent);
             }
-        }
+        });
+
+        const results = await Promise.all(fetchTasks);
+        results.forEach(({ stats, buttonsContainer, loader }) => {
+            buttonsContainer.removeChild(loader);
+
+            const statsButtons = [
+                { label: `Views: ${stats.views.toLocaleString()}`, type: 'views' },
+                { label: `Upvotes: ${stats.upvotes}`, type: 'upvotes' },
+                { label: `Created: ${stats.date !== 'N/A' ? new Date(stats.date).toLocaleDateString('en-AU') : 'N/A'}`, type: 'date' }
+            ];
+
+            statsButtons.forEach(stat => {
+                const button = document.createElement('button');
+                button.textContent = stat.label;
+                button.dataset.statType = stat.type;
+                button.classList.add('stat-button');
+                button.disabled = true;
+                buttonsContainer.appendChild(button);
+            });
+        });
     }
 
-    sections.forEach((section, idx) => {
-        console.log(`Processing section ${idx + 1} data:`, section.dataset);
+    sections.forEach(section => {
         if (section.dataset.type) {
-            const typeStr = section.dataset.type.toString().toLowerCase().trim();
-            typeStr.split(/[\s,]+/).forEach(t => {
+            section.dataset.type.toLowerCase().trim().split(/[\s,]+/).forEach(t => {
                 const trimmedT = t.trim();
-                if (trimmedT) {
-                    const normalizedT = trimmedT.toLowerCase() === 'non-mbti' ? 'non-mbti' : trimmedT;
-                    types.add(normalizedT);
-                }
+                if (trimmedT) types.add(trimmedT === 'non-mbti' ? 'non-mbti' : trimmedT);
             });
         }
         if (section.dataset.keywords) {
-            const keywordsStr = section.dataset.keywords.toString().toLowerCase().trim();
-            const keywordsArray = keywordsStr.split(',')
-                .map(kw => kw.trim())
-                .filter(kw => kw.length > 0);
-            keywordsArray.forEach(kw => keywordsSet.add(kw));
+            section.dataset.keywords.toLowerCase().trim().split(',').map(kw => kw.trim()).filter(kw => kw).forEach(kw => keywordsSet.add(kw));
         }
         if (section.dataset.meme) {
-            const memeStr = section.dataset.meme.toString().toLowerCase().trim();
+            const memeStr = section.dataset.meme.toLowerCase().trim();
             if (memeStr) memes.add(memeStr);
         }
 
@@ -103,52 +93,58 @@ document.addEventListener('DOMContentLoaded', () => {
         if (buttonsContainer) {
             const buttonData = [];
             if (section.dataset.type) {
-                const typeStr = section.dataset.type.toLowerCase().trim();
-                typeStr.split(/[\s,]+/).forEach(t => {
-                    const tTrimmed = t.trim();
-                    if (tTrimmed) {
-                        const typeLower = tTrimmed.toLowerCase() === 'non-mbti' ? 'non-mbti' : tTrimmed.toLowerCase();
-                        const displayLabel = typeLower === 'non-mbti' ? 'Non-MBTI' : typeLower.toUpperCase();
-                        buttonData.push({ type: 'type', value: typeLower, label: `type: ${displayLabel}` });
+                section.dataset.type.toLowerCase().trim().split(/[\s,]+/).forEach(t => {
+                    const trimmedT = t.trim();
+                    if (trimmedT) {
+                        const value = trimmedT === 'non-mbti' ? 'non-mbti' : trimmedT;
+                        const label = value === 'non-mbti' ? 'Non-MBTI' : value.toUpperCase();
+                        buttonData.push({ type: 'type', value, label: `type: ${label}` });
                     }
                 });
             }
             if (section.dataset.meme) {
-                const memeStr = section.dataset.meme.toLowerCase().trim();
-                if (memeStr) {
-                    buttonData.push({ type: 'meme', value: memeStr, label: memeStr });
-                }
+                const value = section.dataset.meme.toLowerCase().trim();
+                if (value) buttonData.push({ type: 'meme', value, label: value });
             }
             if (section.dataset.keywords) {
-                const keywordsStr = section.dataset.keywords.toLowerCase().trim();
-                const keywordsArray = keywordsStr.split(',')
-                    .map(kw => kw.trim())
-                    .filter(kw => kw.length > 0);
-                keywordsArray.forEach(kw => {
-                    if (kw) {
-                        buttonData.push({ type: 'keywords', value: kw, label: kw });
-                    }
+                section.dataset.keywords.toLowerCase().trim().split(',').map(kw => kw.trim()).filter(kw => kw).forEach(kw => {
+                    buttonData.push({ type: 'keywords', value: kw, label: kw });
                 });
             }
 
-            if (buttonData.length) {
-                buttonData.forEach(data => {
-                    const button = document.createElement('button');
-                    button.textContent = data.label;
-                    button.dataset.filterType = data.type;
-                    button.dataset.value = data.value;
-                    button.addEventListener('click', () => filterSections(data.type, data.value));
-                    buttonsContainer.appendChild(button);
-                });
-            }
+            buttonData.forEach(data => {
+                const button = document.createElement('button');
+                button.textContent = data.label;
+                button.dataset.filterType = data.type;
+                button.dataset.value = data.value;
+                button.addEventListener('click', () => filterSections(data.type, data.value));
+                buttonsContainer.appendChild(button);
+            });
         }
+
+        // Add accordion functionality
+        const infoBox = section.querySelector('.info-box');
+        const panel = section.querySelector('.image-container');
+        const titleRow = section.querySelector('.title-row');
+        const arrow = document.createElement('span');
+        arrow.classList.add('arrow');
+        arrow.textContent = '+';
+        titleRow.insertBefore(arrow, titleRow.querySelector('.image-links'));
+
+        infoBox.addEventListener('click', () => {
+            infoBox.classList.toggle('active');
+            const isActive = infoBox.classList.contains('active');
+            arrow.textContent = isActive ? '-' : '+';
+            panel.style.display = isActive ? 'block' : 'none';
+        });
+
+        // Start collapsed
+        panel.style.display = 'none';
     });
 
     const mbtiTypes = new Set(['estp', 'istp', 'esfp', 'isfp', 'estj', 'istj', 'esfj', 'isfj', 'enfp', 'infp', 'enfj', 'infj', 'entj', 'intj', 'entp', 'intp']);
-    mbtiTypes.forEach(t => types.add(t));
     types.add('non-mbti');
     types.add('all');
-
     const sortedTypes = [...types].sort();
     const sortedKeywords = [...keywordsSet].sort();
     const sortedMemes = [...memes].sort();
@@ -163,20 +159,9 @@ document.addEventListener('DOMContentLoaded', () => {
             container.appendChild(allButton);
 
             values.forEach(value => {
-                if (value && typeof value === 'string') {
+                if (value && typeof value === 'string' && value !== 'all') {
                     const button = document.createElement('button');
-                    let displayText;
-                    if (filterType === 'type') {
-                        if (value === 'all') {
-                            displayText = 'all';
-                        } else if (value === 'non-mbti') {
-                            displayText = 'Non-MBTI';
-                        } else {
-                            displayText = value.toUpperCase();
-                        }
-                    } else {
-                        displayText = value;
-                    }
+                    const displayText = filterType === 'type' ? (value === 'non-mbti' ? 'Non-MBTI' : value.toUpperCase()) : value;
                     button.textContent = displayText;
                     button.dataset.filterType = filterType;
                     button.dataset.value = value;
@@ -191,66 +176,41 @@ document.addEventListener('DOMContentLoaded', () => {
     createButtons(containers.meme, sortedMemes, 'meme');
     createButtons(containers.keywords, sortedKeywords, 'keywords');
 
-    let currentFilters = {
-        type: 'all',
-        meme: 'all',
-        keywords: 'all'
-    };
+    let currentFilters = { type: 'all', meme: 'all', keywords: 'all' };
 
     function filterSections(filterType, value) {
-        console.log(`Filtering ${filterType} with value:`, value);
         currentFilters[filterType] = value === currentFilters[filterType] ? 'all' : value;
-        console.log('Current filters:', currentFilters);
 
         document.querySelectorAll(`button[data-filter-type="${filterType}"]`).forEach(btn => {
-            const btnValue = btn.dataset.value;
-            const isActive = btnValue === currentFilters[filterType] && currentFilters[filterType] !== 'all';
+            const isActive = btn.dataset.value === currentFilters[filterType] && currentFilters[filterType] !== 'all';
             btn.classList.toggle('active', isActive);
             btn.setAttribute('aria-pressed', isActive);
         });
 
         sections.forEach(section => {
-            section.classList.remove('hidden');
-            const activeFilter = Object.entries(currentFilters).find(([key, val]) => val !== 'all');
-            let matches = !activeFilter;
-
-            if (activeFilter) {
-                const [activeType, activeValue] = activeFilter;
-                let sectionValue;
-
-                if (activeType === 'type') {
-                    sectionValue = section.dataset.type ? section.dataset.type.toLowerCase().trim() : '';
-                    if (activeValue === 'non-mbti') {
-                        matches = !sectionValue.split(/[\s,]+/).some(t => mbtiTypes.has(t));
-                    } else if (activeValue === 'all') {
-                        matches = true;
+            let matches = true;
+            Object.entries(currentFilters).forEach(([key, val]) => {
+                if (val === 'all') return;
+                let sectionValue = section.dataset[key] ? section.dataset[key].toLowerCase().trim() : '';
+                if (key === 'type') {
+                    const typesArray = sectionValue.split(/[\s,]+/);
+                    if (val === 'non-mbti') {
+                        matches &= !typesArray.some(t => mbtiTypes.has(t));
                     } else {
-                        matches = sectionValue.split(/[\s,]+/).includes(activeValue);
+                        matches &= typesArray.includes(val);
                     }
-                } else if (activeType === 'meme') {
-                    sectionValue = section.dataset.meme ? section.dataset.meme.toLowerCase().trim() : '';
-                    matches = sectionValue === activeValue;
-                } else if (activeType === 'keywords') {
-                    sectionValue = section.dataset.keywords ? section.dataset.keywords.toLowerCase().trim() : '';
-                    const keywordsArray = sectionValue.split(',')
-                        .map(kw => kw.trim())
-                        .filter(kw => kw.length > 0);
-                    if (activeValue && activeValue.includes(' ')) {
-                        matches = keywordsArray.some(kw => kw === activeValue);
-                    } else if (activeValue) {
-                        matches = keywordsArray.some(kw => kw.includes(activeValue));
-                    } else {
-                        matches = false;
-                    }
+                } else if (key === 'meme') {
+                    matches &= sectionValue === val;
+                } else if (key === 'keywords') {
+                    const keywordsArray = sectionValue.split(',').map(kw => kw.trim());
+                    matches &= keywordsArray.some(kw => kw.includes(val));
                 }
-                console.log(`Checking ${activeType}='${activeValue}' against section value='${sectionValue}': ${matches}`);
-            }
-
+            });
             section.classList.toggle('hidden', !matches);
         });
     }
 
-    // Initialize filters and fetch stats
+    // Initialize
     Object.keys(currentFilters).forEach(filter => filterSections(filter, 'all'));
     updateMemeStats();
 });
