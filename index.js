@@ -1,3 +1,52 @@
+// Error Logger: Collects console errors/logs and auto-downloads a file after 5s (or on manual trigger)
+(function() {
+    let logEntries = [];
+    const originalConsoleError = console.error;
+    const originalConsoleLog = console.log;
+    const originalConsoleWarn = console.warn;
+
+    // Override console methods to capture
+    console.error = function(...args) {
+        logEntries.push({ type: 'ERROR', timestamp: new Date().toISOString(), message: args.join(' ') });
+        originalConsoleError.apply(console, args);
+    };
+    console.log = function(...args) {
+        logEntries.push({ type: 'LOG', timestamp: new Date().toISOString(), message: args.join(' ') });
+        originalConsoleLog.apply(console, args);
+    };
+    console.warn = function(...args) {
+        logEntries.push({ type: 'WARN', timestamp: new Date().toISOString(), message: args.join(' ') });
+        originalConsoleWarn.apply(console, args);
+    };
+
+    // Function to download logs as TXT
+    function downloadLogs() {
+        const logText = logEntries.map(entry => `[${entry.timestamp}] ${entry.type}: ${entry.message}`).join('\n');
+        const blob = new Blob([logText], { type: 'text/plain' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `js-errors-${new Date().toISOString().split('T')[0]}.txt`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+        console.log('Error log downloaded! Check your Downloads folder.');
+    }
+
+    // Auto-download after 5 seconds (adjust if needed; or remove for manual)
+    setTimeout(downloadLogs, 5000);
+
+    // Optional: Add a button to trigger manually (uncomment if you want)
+    /*
+    const triggerBtn = document.createElement('button');
+    triggerBtn.textContent = 'Download Error Log';
+    triggerBtn.style.position = 'fixed'; triggerBtn.style.top = '10px'; triggerBtn.style.right = '10px'; triggerBtn.style.zIndex = '9999';
+    triggerBtn.onclick = downloadLogs;
+    document.body.appendChild(triggerBtn);
+    */
+})();
+
 document.addEventListener('DOMContentLoaded', () => {
     const sections = document.querySelectorAll('.content-section');
 
