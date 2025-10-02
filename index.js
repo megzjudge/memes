@@ -42,39 +42,46 @@ document.addEventListener('DOMContentLoaded', () => {
                     section.dataset.memeId = memeId;
 
                     const buttonsContainer = section.querySelector('.section-buttons');
-                    const loader = document.createElement('div');
-                    loader.classList.add('loader');
-                    buttonsContainer.appendChild(loader);
+                    if (buttonsContainer) {
+                        const loader = document.createElement('div');
+                        loader.classList.add('loader');
+                        buttonsContainer.appendChild(loader);
 
-                    fetchTasks.push(
-                        fetchMemeStats(memeId).then(stats => ({ section, stats, buttonsContainer, loader }))
-                    );
+                        fetchTasks.push(
+                            fetchMemeStats(memeId).then(stats => ({ stats, buttonsContainer, loader }))
+                        );
+                    }
                 }
             }
         });
 
-        const results = await Promise.all(fetchTasks);
-        results.forEach(({ stats, buttonsContainer, loader }) => {
-            buttonsContainer.removeChild(loader);
+        if (fetchTasks.length > 0) {
+            const results = await Promise.all(fetchTasks);
+            results.forEach(({ stats, buttonsContainer, loader }) => {
+                if (buttonsContainer.contains(loader)) {
+                    buttonsContainer.removeChild(loader);
+                }
 
-            const statsButtons = [
-                { label: `Views: ${stats.views.toLocaleString()}`, type: 'views' },
-                { label: `Upvotes: ${stats.upvotes}`, type: 'upvotes' },
-                { label: `Created: ${stats.date !== 'N/A' ? new Date(stats.date).toLocaleDateString('en-AU') : 'N/A'}`, type: 'date' }
-            ];
+                const statsButtons = [
+                    { label: `Views: ${stats.views.toLocaleString()}`, type: 'views' },
+                    { label: `Upvotes: ${stats.upvotes}`, type: 'upvotes' },
+                    { label: `Created: ${stats.date !== 'N/A' ? new Date(stats.date).toLocaleDateString('en-AU') : 'N/A'}`, type: 'date' }
+                ];
 
-            statsButtons.forEach(stat => {
-                const button = document.createElement('button');
-                button.textContent = stat.label;
-                button.dataset.statType = stat.type;
-                button.classList.add('stat-button');
-                button.disabled = true;
-                buttonsContainer.appendChild(button);
+                statsButtons.forEach(stat => {
+                    const button = document.createElement('button');
+                    button.textContent = stat.label;
+                    button.dataset.statType = stat.type;
+                    button.classList.add('stat-button');
+                    button.disabled = true;
+                    buttonsContainer.appendChild(button);
+                });
             });
-        });
+        }
     }
 
-    sections.forEach(section => {
+    sections.forEach((section, idx) => {
+        // Collect filter data
         if (section.dataset.type) {
             section.dataset.type.toLowerCase().trim().split(/[\s,]+/).forEach(t => {
                 const trimmedT = t.trim();
@@ -89,6 +96,7 @@ document.addEventListener('DOMContentLoaded', () => {
             if (memeStr) memes.add(memeStr);
         }
 
+        // Add per-section filter buttons
         const buttonsContainer = section.querySelector('.section-buttons');
         if (buttonsContainer) {
             const buttonData = [];
@@ -125,26 +133,41 @@ document.addEventListener('DOMContentLoaded', () => {
         // Add accordion functionality
         const infoBox = section.querySelector('.info-box');
         const panel = section.querySelector('.image-container');
-        const titleRow = section.querySelector('.title-row');
-        const arrow = document.createElement('span');
-        arrow.classList.add('arrow');
-        arrow.textContent = '+';
-        titleRow.insertBefore(arrow, titleRow.querySelector('.image-links'));
+        if (infoBox && panel) {
+            const titleRow = section.querySelector('.title-row');
+            if (titleRow) {
+                const imageLinks = titleRow.querySelector('.image-links');
+                const arrow = document.createElement('span');
+                arrow.classList.add('arrow');
+                arrow.textContent = '+';
+                if (imageLinks) {
+                    titleRow.insertBefore(arrow, imageLinks);
+                } else {
+                    // Fallback: append to end of titleRow
+                    titleRow.appendChild(arrow);
+                }
 
-        infoBox.addEventListener('click', () => {
-            infoBox.classList.toggle('active');
-            const isActive = infoBox.classList.contains('active');
-            arrow.textContent = isActive ? '-' : '+';
-            panel.style.display = isActive ? 'block' : 'none';
-        });
+                infoBox.addEventListener('click', (e) => {
+                    // Prevent clicks on buttons/links from toggling
+                    if (e.target.closest('button') || e.target.closest('a')) return;
+                    infoBox.classList.toggle('active');
+                    const isActive = infoBox.classList.contains('active');
+                    arrow.textContent = isActive ? '−' : '+';  // Use proper minus for better look
+                    panel.style.display = isActive ? 'block' : 'none';
+                });
+            }
 
-        // Start collapsed
-        panel.style.display = 'none';
+            // Start collapsed
+            panel.style.display = 'none';
+        }
     });
 
+    // Force-add all MBTI types (restored from original)
     const mbtiTypes = new Set(['estp', 'istp', 'esfp', 'isfp', 'estj', 'istj', 'esfj', 'isfj', 'enfp', 'infp', 'enfj', 'infj', 'entj', 'intj', 'entp', 'intp']);
+    mbtiTypes.forEach(t => types.add(t));
     types.add('non-mbti');
     types.add('all');
+
     const sortedTypes = [...types].sort();
     const sortedKeywords = [...keywordsSet].sort();
     const sortedMemes = [...memes].sort();
@@ -181,31 +204,39 @@ document.addEventListener('DOMContentLoaded', () => {
     function filterSections(filterType, value) {
         currentFilters[filterType] = value === currentFilters[filterType] ? 'all' : value;
 
+        // Update button states
         document.querySelectorAll(`button[data-filter-type="${filterType}"]`).forEach(btn => {
-            const isActive = btn.dataset.value === currentFilters[filterType] && currentFilters[filterType] !== 'all';
+            const btnValue = btn.dataset.value;
+            const isActive = btnValue === currentFilters[filterType] && currentFilters[filterType] !== 'all';
             btn.classList.toggle('active', isActive);
-            btn.setAttribute('aria-pressed', isActive);
+            btn.setAttribute('aria-pressed', isActive ? 'true' : 'false');
         });
 
+        // Filter sections (reverted to original: only apply the active filter in this category)
         sections.forEach(section => {
-            let matches = true;
-            Object.entries(currentFilters).forEach(([key, val]) => {
-                if (val === 'all') return;
-                let sectionValue = section.dataset[key] ? section.dataset[key].toLowerCase().trim() : '';
-                if (key === 'type') {
+            section.classList.remove('hidden');
+            const activeFilter = Object.entries(currentFilters).find(([key, val]) => val !== 'all' && key === filterType);
+            let matches = !activeFilter;
+
+            if (activeFilter) {
+                const [, activeValue] = activeFilter;
+                let sectionValue = section.dataset[filterType] ? section.dataset[filterType].toLowerCase().trim() : '';
+
+                if (filterType === 'type') {
                     const typesArray = sectionValue.split(/[\s,]+/);
-                    if (val === 'non-mbti') {
-                        matches &= !typesArray.some(t => mbtiTypes.has(t));
+                    if (activeValue === 'non-mbti') {
+                        matches = !typesArray.some(t => mbtiTypes.has(t.trim()));
                     } else {
-                        matches &= typesArray.includes(val);
+                        matches = typesArray.includes(activeValue);
                     }
-                } else if (key === 'meme') {
-                    matches &= sectionValue === val;
-                } else if (key === 'keywords') {
-                    const keywordsArray = sectionValue.split(',').map(kw => kw.trim());
-                    matches &= keywordsArray.some(kw => kw.includes(val));
+                } else if (filterType === 'meme') {
+                    matches = sectionValue === activeValue;
+                } else if (filterType === 'keywords') {
+                    const keywordsArray = sectionValue.split(',').map(kw => kw.trim()).filter(kw => kw);
+                    matches = keywordsArray.some(kw => kw.includes(activeValue));
                 }
-            });
+            }
+
             section.classList.toggle('hidden', !matches);
         });
     }
