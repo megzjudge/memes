@@ -34,27 +34,38 @@
         console.log('Error log downloaded! Check your Downloads folder.');
     }
 
-    // Auto-download after 5 seconds (adjust if needed; or remove for manual)
+    // Auto-download after 5 seconds
     setTimeout(downloadLogs, 5000);
 
-    // Optional: Add a button to trigger manually (uncomment if you want)
-    /*
+    // Manual button (uncommented for easy access)
     const triggerBtn = document.createElement('button');
     triggerBtn.textContent = 'Download Error Log';
-    triggerBtn.style.position = 'fixed'; triggerBtn.style.top = '10px'; triggerBtn.style.right = '10px'; triggerBtn.style.zIndex = '9999';
+    triggerBtn.style.position = 'fixed'; 
+    triggerBtn.style.top = '10px'; 
+    triggerBtn.style.right = '10px'; 
+    triggerBtn.style.zIndex = '9999';
+    triggerBtn.style.background = '#ff4444'; 
+    triggerBtn.style.color = 'white'; 
+    triggerBtn.style.padding = '5px 10px'; 
+    triggerBtn.style.border = 'none'; 
+    triggerBtn.style.borderRadius = '3px'; 
+    triggerBtn.style.cursor = 'pointer';
     triggerBtn.onclick = downloadLogs;
     document.body.appendChild(triggerBtn);
-    */
 })();
 
 document.addEventListener('DOMContentLoaded', () => {
+    console.log('DOM loaded - starting MBTI Meme init');
+
     const sections = document.querySelectorAll('.content-section');
+    console.log(`Found ${sections.length} sections`);
 
     const containers = {
         type: document.getElementById('type-buttons'),
         meme: document.getElementById('meme-buttons'),
         keywords: document.getElementById('keywords-buttons')
     };
+    console.log('Containers:', containers);
 
     const types = new Set();
     const keywordsSet = new Set();
@@ -78,8 +89,9 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
-    // Update sections with stats buttons (optimized with parallel fetches)
+    // Update sections with stats buttons
     async function updateMemeStats() {
+        console.log('Starting meme stats update');
         const fetchTasks = [];
 
         sections.forEach(section => {
@@ -89,12 +101,14 @@ document.addEventListener('DOMContentLoaded', () => {
                 if (urlMatch) {
                     const memeId = urlMatch[1];
                     section.dataset.memeId = memeId;
+                    console.log(`Matched memeId: ${memeId}`);
 
                     const buttonsContainer = section.querySelector('.section-buttons');
                     if (buttonsContainer) {
                         const loader = document.createElement('div');
                         loader.classList.add('loader');
                         buttonsContainer.appendChild(loader);
+                        console.log('Added loader for', memeId);
 
                         fetchTasks.push(
                             fetchMemeStats(memeId).then(stats => ({ stats, buttonsContainer, loader }))
@@ -105,31 +119,78 @@ document.addEventListener('DOMContentLoaded', () => {
         });
 
         if (fetchTasks.length > 0) {
-            const results = await Promise.all(fetchTasks);
-            results.forEach(({ stats, buttonsContainer, loader }) => {
-                if (buttonsContainer.contains(loader)) {
-                    buttonsContainer.removeChild(loader);
-                }
+            try {
+                const results = await Promise.all(fetchTasks);
+                console.log(`Fetched stats for ${results.length} memes`);
+                results.forEach(({ stats, buttonsContainer, loader }) => {
+                    if (buttonsContainer.contains(loader)) {
+                        buttonsContainer.removeChild(loader);
+                    }
 
-                const statsButtons = [
-                    { label: `Views: ${stats.views.toLocaleString()}`, type: 'views' },
-                    { label: `Upvotes: ${stats.upvotes}`, type: 'upvotes' },
-                    { label: `Created: ${stats.date !== 'N/A' ? new Date(stats.date).toLocaleDateString('en-AU') : 'N/A'}`, type: 'date' }
-                ];
+                    const statsButtons = [
+                        { label: `Views: ${stats.views.toLocaleString()}`, type: 'views' },
+                        { label: `Upvotes: ${stats.upvotes}`, type: 'upvotes' },
+                        { label: `Created: ${stats.date !== 'N/A' ? new Date(stats.date).toLocaleDateString('en-AU') : 'N/A'}`, type: 'date' }
+                    ];
 
-                statsButtons.forEach(stat => {
-                    const button = document.createElement('button');
-                    button.textContent = stat.label;
-                    button.dataset.statType = stat.type;
-                    button.classList.add('stat-button');
-                    button.disabled = true;
-                    buttonsContainer.appendChild(button);
+                    statsButtons.forEach(stat => {
+                        const button = document.createElement('button');
+                        button.textContent = stat.label;
+                        button.dataset.statType = stat.type;
+                        button.classList.add('stat-button');
+                        button.disabled = true;
+                        buttonsContainer.appendChild(button);
+                    });
                 });
-            });
+            } catch (err) {
+                console.error('Error in updateMemeStats:', err);
+            }
+        } else {
+            console.log('No valid meme links found for stats');
         }
     }
 
-    sections.forEach((section, idx) => {
+    // Defined initializeAccordion function (to fix the ReferenceError)
+    function initializeAccordion() {
+        console.log('Initializing accordions');
+        sections.forEach((section) => {
+            const infoBox = section.querySelector('.info-box');
+            const panel = section.querySelector('.image-container');
+            if (infoBox && panel) {
+                const titleRow = section.querySelector('.title-row');
+                if (titleRow) {
+                    const imageLinks = titleRow.querySelector('.image-links');
+                    let arrow = titleRow.querySelector('.arrow');
+                    if (!arrow) {
+                        arrow = document.createElement('span');
+                        arrow.classList.add('arrow');
+                        arrow.textContent = '+';
+                        if (imageLinks) {
+                            titleRow.insertBefore(arrow, imageLinks);
+                        } else {
+                            titleRow.appendChild(arrow);
+                        }
+                    }
+
+                    // Remove existing listener to avoid duplicates
+                    infoBox.removeEventListener('click', handleAccordionClick);
+                    infoBox.addEventListener('click', handleAccordionClick);
+
+                    function handleAccordionClick(e) {
+                        if (e.target.closest('button') || e.target.closest('a')) return;
+                        infoBox.classList.toggle('active');
+                        const isActive = infoBox.classList.contains('active');
+                        arrow.textContent = isActive ? '−' : '+';
+                        panel.style.display = isActive ? 'block' : 'none';
+                    }
+                }
+                panel.style.display = 'none'; // Start collapsed
+            }
+        });
+    }
+
+    // Process sections for filters and data collection
+    sections.forEach((section) => {
         // Collect filter data
         if (section.dataset.type) {
             section.dataset.type.toLowerCase().trim().split(/[\s,]+/).forEach(t => {
@@ -178,40 +239,9 @@ document.addEventListener('DOMContentLoaded', () => {
                 buttonsContainer.appendChild(button);
             });
         }
-
-        // Add accordion functionality
-        const infoBox = section.querySelector('.info-box');
-        const panel = section.querySelector('.image-container');
-        if (infoBox && panel) {
-            const titleRow = section.querySelector('.title-row');
-            if (titleRow) {
-                const imageLinks = titleRow.querySelector('.image-links');
-                const arrow = document.createElement('span');
-                arrow.classList.add('arrow');
-                arrow.textContent = '+';
-                if (imageLinks) {
-                    titleRow.insertBefore(arrow, imageLinks);
-                } else {
-                    // Fallback: append to end of titleRow
-                    titleRow.appendChild(arrow);
-                }
-
-                infoBox.addEventListener('click', (e) => {
-                    // Prevent clicks on buttons/links from toggling
-                    if (e.target.closest('button') || e.target.closest('a')) return;
-                    infoBox.classList.toggle('active');
-                    const isActive = infoBox.classList.contains('active');
-                    arrow.textContent = isActive ? '−' : '+';  // Use proper minus for better look
-                    panel.style.display = isActive ? 'block' : 'none';
-                });
-            }
-
-            // Start collapsed
-            panel.style.display = 'none';
-        }
     });
 
-    // Force-add all MBTI types (restored from original)
+    // Force-add all MBTI types
     const mbtiTypes = new Set(['estp', 'istp', 'esfp', 'isfp', 'estj', 'istj', 'esfj', 'isfj', 'enfp', 'infp', 'enfj', 'infj', 'entj', 'intj', 'entp', 'intp']);
     mbtiTypes.forEach(t => types.add(t));
     types.add('non-mbti');
@@ -241,6 +271,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     container.appendChild(button);
                 }
             });
+            console.log(`Created ${values.length} buttons for ${filterType}`);
         }
     }
 
@@ -251,6 +282,7 @@ document.addEventListener('DOMContentLoaded', () => {
     let currentFilters = { type: 'all', meme: 'all', keywords: 'all' };
 
     function filterSections(filterType, value) {
+        console.log(`Filtering ${filterType} with value: ${value}`);
         currentFilters[filterType] = value === currentFilters[filterType] ? 'all' : value;
 
         // Update button states
@@ -261,7 +293,7 @@ document.addEventListener('DOMContentLoaded', () => {
             btn.setAttribute('aria-pressed', isActive ? 'true' : 'false');
         });
 
-        // Filter sections (reverted to original: only apply the active filter in this category)
+        // Filter sections
         sections.forEach(section => {
             section.classList.remove('hidden');
             const activeFilter = Object.entries(currentFilters).find(([key, val]) => val !== 'all' && key === filterType);
@@ -290,7 +322,13 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
-    // Initialize
-    Object.keys(currentFilters).forEach(filter => filterSections(filter, 'all'));
-    updateMemeStats();
+    // Initialize everything
+    try {
+        Object.keys(currentFilters).forEach(filter => filterSections(filter, 'all'));
+        initializeAccordion();  // This was the missing piece—now defined!
+        updateMemeStats();
+        console.log('MBTI Meme init complete');
+    } catch (err) {
+        console.error('Init error:', err);
+    }
 });
