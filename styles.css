@@ -68,20 +68,31 @@ header p {
     box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
 }
 
-.filter-container div {
-    margin: 10px 0;
+.filter-row {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.5rem;
 }
 
-.filter-container h4 {
-    padding: 0.5rem 1rem;
+.filter-row h4 {
+    padding: 0.5rem 0;
     background-color: transparent;
-    margin-bottom: 0.5rem;
+    margin-bottom: 0;
     font-size: 0.85rem;
     color: #e0d7f7;
+    white-space: nowrap;
+}
+
+#type-buttons, #meme-buttons, #keywords-buttons {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 5px;
+    align-items: center;
 }
 
 .filter-container button {
-    margin: 5px;
+    margin: 0; /* Removed margin to rely on parent gap */
     padding: 8px 12px;
     border: 1px solid #e0d7f7;
     background-color: transparent;
@@ -108,7 +119,7 @@ header p {
 .content-section {
     display: flex;
     flex-direction: column;
-    gap: 1.5rem;
+    gap: 2rem; /* Increased for better spacing between info-box and image */
     padding: 1.5rem 0;
     align-items: center;
     background-color: #4a2c72;
@@ -137,6 +148,7 @@ header p {
     max-width: 90%;
     text-align: left;
     color: #e0d7f7;
+    cursor: pointer; /* Indicates clickable for accordion */
 }
 
 .info-box .title-row {
@@ -151,6 +163,13 @@ header p {
     font-size: 1.5rem;
     color: #e0d7f7;
     margin: 0;
+}
+
+.arrow {
+    font-size: 1.5rem;
+    color: #e0d7f7;
+    margin-left: auto;
+    margin-right: 1rem; /* Space before links */
 }
 
 .info-box p.image-links {
@@ -287,6 +306,7 @@ a {
 .image-container {
     max-width: 100%;
     overflow: hidden;
+    padding: 1rem 0; /* Added symmetric padding for better spacing under the text/image */
 }
 
 .image-container img {
@@ -294,6 +314,21 @@ a {
     height: auto;
     border-radius: 10px;
     box-shadow: 0 4px 8px rgba(0, 0, 0, 0.3);
+}
+
+.loader {
+    border: 4px solid rgba(224, 215, 247, 0.2);
+    border-top: 4px solid #e0d7f7;
+    border-radius: 50%;
+    width: 20px;
+    height: 20px;
+    animation: spin 1s linear infinite;
+    margin: 6px 10px; /* Aligns with button spacing */
+}
+
+@keyframes spin {
+    0% { transform: rotate(0deg); }
+    100% { transform: rotate(360deg); }
 }
 
 footer {
@@ -346,6 +381,11 @@ footer a:hover {
         font-size: 1.2rem;
     }
 
+    .arrow {
+        margin-left: 0;
+        margin-right: 0.5rem;
+    }
+
     .info-box p.image-links {
         justify-content: flex-start;
         margin: 0;
@@ -391,6 +431,10 @@ footer a:hover {
         font-size: 0.8rem;
     }
 
+    .image-container {
+        padding: 0.5rem 0; /* Adjusted for mobile */
+    }
+
     .image-container img {
         max-width: 100%;
     }
@@ -403,6 +447,11 @@ footer a:hover {
     .filter-container button {
         padding: 6px 10px;
         font-size: 0.8rem;
+    }
+
+    .loader {
+        width: 16px;
+        height: 16px;
     }
 }
 
@@ -445,5 +494,10 @@ footer a:hover {
     .filter-container button {
         padding: 7px 11px;
         font-size: 0.85rem;
+    }
+
+    .loader {
+        width: 18px;
+        height: 18px;
     }
 }
