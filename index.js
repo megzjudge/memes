@@ -1,10 +1,9 @@
 // index.js
 // - Fetches featured-only feed from the Worker.
 // - Dynamically renders all <section class="content-section">.
-// - Fixes apostrophes via Worker (titles already decoded).
-// - Type chips are plain ENTP / ESTP etc. (no "Type:").
-// - "NON-MBTI" handled as a single canonical value.
-// - Views on the left, Imgflip + KYM icons on the right in one row.
+// - HTML entities (apostrophes) are decoded in the Worker.
+// - Type chips: ENTP / ESTP / NON-MBTI (no "Type:").
+// - Views on the left, Imgflip + KYM icons on the right.
 
 const FEED_BASE = "https://rapid-math-6088.touch-97a.workers.dev";
 
@@ -30,23 +29,21 @@ document.addEventListener("DOMContentLoaded", () => {
   );
   bootstrap().catch(err => {
     console.error("Bootstrap failed:", err);
-    showEmpty("Failed to load memes.");
+    showEmpty("No memes found.");
   });
 });
 
 async function bootstrap() {
   const items = await fetchFeed();
   if (!items.length) {
-    showEmpty("No memes found (only featured items are shown).");
+    showEmpty("No memes found.");
     return;
   }
   renderSections(items);
   initFilters();
 }
 
-// ------------------------------------------------------------
-// Fetch feed from Worker
-// ------------------------------------------------------------
+// ---------------- fetch feed ----------------
 
 async function fetchFeed() {
   const url = `${FEED_BASE}/feed?fresh=1`;
@@ -63,9 +60,7 @@ async function fetchFeed() {
   return items;
 }
 
-// ------------------------------------------------------------
-// Rendering
-// ------------------------------------------------------------
+// ---------------- rendering ----------------
 
 function showEmpty(msg) {
   const main = document.querySelector("main");
@@ -98,12 +93,14 @@ function renderSections(items) {
       : Array.isArray(item.tags)
       ? item.tags
       : [];
-    const keywordsArr = rawKeywords.map(k => String(k).toLowerCase().trim()).filter(Boolean);
+    const keywordsArr = rawKeywords
+      .map(k => String(k).toLowerCase().trim())
+      .filter(Boolean);
     const keywordsStr = keywordsArr.join(",");
 
-    section.dataset.type = typeList;         // e.g. "ENTP, ESTP" or "NON-MBTI"
-    section.dataset.meme = memeLower;        // e.g. "they're the same picture"
-    section.dataset.keywords = keywordsStr;  // e.g. "entp,estp,mbti,myers briggs"
+    section.dataset.type = typeList;
+    section.dataset.meme = memeLower;
+    section.dataset.keywords = keywordsStr;
 
     const title = escapeHtml(item.title || item.id || "Untitled");
     const pageUrl = item.page_url || `https://imgflip.com/i/${item.id}`;
@@ -140,7 +137,8 @@ function renderSections(items) {
     const buttonsContainer = section.querySelector(".section-buttons");
     if (buttonsContainer) {
       const chipData = [];
-      // Type chips: ENTP, ESTP, NON-MBTI (no "Type: " prefix)
+
+      // type chips: ENTP / ESTP / NON-MBTI
       typeList
         .split(/[\s,]+/)
         .map(t => t.trim())
@@ -150,7 +148,6 @@ function renderSections(items) {
           chipData.push({ type: "type", value: T, label: displayType(T) });
         });
 
-      // Meme type chip
       if (memeLower) {
         chipData.push({
           type: "meme",
@@ -159,7 +156,6 @@ function renderSections(items) {
         });
       }
 
-      // Keyword chips
       keywordsArr.forEach(kw => {
         chipData.push({
           type: "keywords",
@@ -168,7 +164,6 @@ function renderSections(items) {
         });
       });
 
-      // De-duplicate chips by (type,value)
       const seen = new Set();
       chipData.forEach(d => {
         const key = `${d.type}:${d.value}`;
@@ -191,9 +186,7 @@ function renderSections(items) {
   sections = Array.from(document.querySelectorAll(".content-section"));
 }
 
-// ------------------------------------------------------------
-// Filters
-// ------------------------------------------------------------
+// ---------------- filters ----------------
 
 function initFilters() {
   sections = Array.from(document.querySelectorAll(".content-section"));
@@ -202,9 +195,9 @@ function initFilters() {
   const memeButtonsContainer = document.getElementById("meme-buttons");
   const keywordButtonsContainer = document.getElementById("keywords-buttons");
 
-  const typeOptions = new Set();     // UPPERCASE: ENTP, ESTP, NON-MBTI
-  const memeOptions = new Set();     // lowercase
-  const keywordOptions = new Set();  // lowercase
+  const typeOptions = new Set();
+  const memeOptions = new Set();
+  const keywordOptions = new Set();
 
   sections.forEach(section => {
     const typeStr = (section.dataset.type || "").trim();
@@ -229,15 +222,12 @@ function initFilters() {
     }
   });
 
-  // Ensure all MBTI codes appear as options
   MBTI_TYPES.forEach(t => typeOptions.add(t));
 
-  // If any section is non-mbti, ensure we have exactly one NON-MBTI option
   if (sections.some(s => (s.dataset.type || "").toUpperCase().includes("NON-MBTI"))) {
     typeOptions.add("NON-MBTI");
   }
 
-  // Build buttons
   buildFilterButtons(typeButtonsContainer, Array.from(typeOptions).sort(), "type");
   buildFilterButtons(memeButtonsContainer, Array.from(memeOptions).sort(), "meme");
   buildFilterButtons(keywordButtonsContainer, Array.from(keywordOptions).sort(), "keywords");
@@ -248,7 +238,6 @@ function buildFilterButtons(container, values, filterType) {
 
   container.innerHTML = "";
 
-  // All button
   const allBtn = document.createElement("button");
   allBtn.textContent = "All";
   allBtn.dataset.filterType = filterType;
@@ -256,7 +245,6 @@ function buildFilterButtons(container, values, filterType) {
   allBtn.addEventListener("click", () => filterSections(filterType, "all"));
   container.appendChild(allBtn);
 
-  // Specific values
   values.forEach(val => {
     if (!val || typeof val !== "string") return;
     const btn = document.createElement("button");
@@ -286,11 +274,9 @@ function filterSections(filterType, value) {
     sections = Array.from(document.querySelectorAll(".content-section"));
   }
 
-  // Toggle behaviour: clicking the same value again resets to 'all'
   currentFilters[filterType] =
     value === currentFilters[filterType] ? "all" : value;
 
-  // Update button states
   document
     .querySelectorAll(`button[data-filter-type="${filterType}"]`)
     .forEach(btn => {
@@ -315,7 +301,6 @@ function filterSections(filterType, value) {
           .filter(Boolean);
 
         if (fVal === "NON-MBTI") {
-          // Match sections that have NO MBTI type tag
           matches = !secTypes.some(t => MBTI_SET.has(t));
         } else {
           matches = secTypes.includes(fVal);
@@ -343,9 +328,7 @@ function filterSections(filterType, value) {
   });
 }
 
-// ------------------------------------------------------------
-// Small helpers
-// ------------------------------------------------------------
+// ---------------- helpers ----------------
 
 function escapeHtml(s) {
   return String(s).replace(/[&<>"']/g, c => {
