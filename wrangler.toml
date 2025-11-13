@@ -1,0 +1,10 @@
+name = "imgflip-user-feed"
+main = "worker.js"
+compatibility_date = "2024-11-20"
+
+kv_namespaces = [
+  { binding = "NINJAMEMES", id = "YOUR_NAMESPACE_ID" }
+]
+
+[triggers]
+crons = ["0 * * * *"]
