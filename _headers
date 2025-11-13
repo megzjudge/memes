@@ -1,7 +1,7 @@
 /*
-Content-Security-Policy: default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' https://imgflip.com https://i.imgflip.com https://memes-e7s.pages.dev https://memes.mbti.ninja https://mbti.ninja; object-src 'none'; base-uri 'self'; form-action 'self'; frame-src https://imgflip.com https://i.imgflip.com https://memes-e7s.pages.dev https://memes.mbti.ninja https://mbti.ninja;
+Content-Security-Policy: default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' https://imgflip.com https://i.imgflip.com https://memes-e7s.pages.dev https://memes.mbti.ninja https://mbti.ninja data:; connect-src 'self' https://rapid-math-6088.touch-97a.workers.dev; object-src 'none'; base-uri 'self'; form-action 'self'; frame-src https://imgflip.com https://i.imgflip.com https://memes-e7s.pages.dev https://memes.mbti.ninja https://mbti.ninja;
 X-Content-Type-Options: nosniff
-X-Frame-Options: ALLOW-FROM https://memes-e7s.pages.dev https://memes.mbti.ninja https://mbti.ninja https://imgflip.com
+X-Frame-Options: SAMEORIGIN
 Strict-Transport-Security: max-age=31536000; includeSubDomains; preload
 Referrer-Policy: strict-origin-when-cross-origin
 Permissions-Policy: geolocation=(),camera=(),microphone=(),payment=(),usb=(),xr-spatial-tracking=()
@@ -9,6 +9,7 @@ Cross-Origin-Embedder-Policy: unsafe-none
 Cross-Origin-Opener-Policy: same-origin-allow-popups
 Cross-Origin-Resource-Policy: cross-origin
 X-Permitted-Cross-Domain-Policies: none
+
 
 /static/images/*.jpg
 /static/images/*.png
