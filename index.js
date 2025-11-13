@@ -1,79 +1,134 @@
 // index.js
-// Fetches feed from the Worker, renders sections, and builds your existing filter UI.
-// Uses ?fresh=1 to keep view counts current each page load.
-// The Meme Type now comes from the /memegenerator/... "recaption" link (Title Case).
+// - Fetches featured-only feed from the Worker.
+// - Dynamically renders all <section class="content-section">.
+// - Fixes apostrophes via Worker (titles already decoded).
+// - Type chips are plain ENTP / ESTP etc. (no "Type:").
+// - "NON-MBTI" handled as a single canonical value.
+// - Views on the left, Imgflip + KYM icons on the right in one row.
 
-document.addEventListener('DOMContentLoaded', () => {
+const FEED_BASE = "https://rapid-math-6088.touch-97a.workers.dev";
+
+let sections = [];
+const currentFilters = {
+  type: "all",
+  meme: "all",
+  keywords: "all"
+};
+
+const MBTI_TYPES = [
+  "ESTP", "ISTP", "ESFP", "ISFP",
+  "ESTJ", "ISTJ", "ESFJ", "ISFJ",
+  "ENFP", "INFP", "ENFJ", "INFJ",
+  "ENTJ", "INTJ", "ENTP", "INTP"
+];
+const MBTI_SET = new Set(MBTI_TYPES);
+
+document.addEventListener("DOMContentLoaded", () => {
   console.log(
-    'Script loaded at',
-    new Date().toLocaleString('en-AU', { timeZone: 'Australia/Sydney' })
+    "Script loaded at",
+    new Date().toLocaleString("en-AU", { timeZone: "Australia/Sydney" })
   );
-
   bootstrap().catch(err => {
-    console.error('Bootstrap failed:', err);
-    // Fallback: keep any hardcoded sections so the page still works
-    initFilters();
+    console.error("Bootstrap failed:", err);
+    showEmpty("Failed to load memes.");
   });
 });
 
 async function bootstrap() {
-  const FEED_URL = 'https://rapid-math-6088.touch-97a.workers.dev/feed?fresh=1';
+  const items = await fetchFeed();
+  if (!items.length) {
+    showEmpty("No memes found (only featured items are shown).");
+    return;
+  }
+  renderSections(items);
+  initFilters();
+}
 
-  // 1) Fetch feed from the Worker
-  const res = await fetch(FEED_URL, { headers: { accept: 'application/json' } });
-  if (!res.ok) throw new Error(`Feed fetch failed: ${res.status}`);
-  const payload = await res.json();
-  const items = Array.isArray(payload.items) ? payload.items : [];
+// ------------------------------------------------------------
+// Fetch feed from Worker
+// ------------------------------------------------------------
 
-  console.log(`Loaded ${items.length} items from feed.`);
+async function fetchFeed() {
+  const url = `${FEED_BASE}/feed?fresh=1`;
+  console.log("Fetching feed from", url);
+  const t0 = performance.now();
+  const res = await fetch(url, { headers: { accept: "application/json" } });
+  if (!res.ok) {
+    throw new Error(`Feed HTTP ${res.status}`);
+  }
+  const json = await res.json();
+  const items = Array.isArray(json.items) ? json.items : [];
+  const t1 = performance.now();
+  console.log(`Got ${items.length} items in ${Math.round(t1 - t0)}ms`);
+  return items;
+}
 
-  // 2) Render sections (replace any static blocks)
-  const main = document.querySelector('main');
-  if (!main) throw new Error('<main> not found');
-  main.innerHTML = '';
+// ------------------------------------------------------------
+// Rendering
+// ------------------------------------------------------------
 
+function showEmpty(msg) {
+  const main = document.querySelector("main");
+  if (!main) return;
+  main.innerHTML = `<div class="empty"><p>${msg}</p></div>`;
+}
+
+function renderSections(items) {
+  const main = document.querySelector("main");
+  if (!main) throw new Error("<main> not found");
+
+  main.innerHTML = "";
   const frag = document.createDocumentFragment();
-  for (const item of items) {
-    const section = document.createElement('section');
-    section.className = 'content-section';
 
-    const mbtiTypes = (item.mbti_types || []).map(t => String(t).toUpperCase());
-    const typeList = mbtiTypes.length ? mbtiTypes.join(', ') : 'non-mbti';
+  items.forEach(item => {
+    const section = document.createElement("section");
+    section.className = "content-section";
 
-    const memeType = (item.meme_type || item.meme_tag || '').toString();
-    const memeTagLower = memeType.toLowerCase();
-    const keywords = Array.isArray(item.keywords)
-      ? item.keywords.join(',')
+    const mbtiTypes = Array.isArray(item.mbti_types)
+      ? item.mbti_types.map(t => String(t).toUpperCase())
+      : [];
+    const typeList = mbtiTypes.length ? mbtiTypes.join(", ") : "NON-MBTI";
+
+    const rawMemeType = item.meme_type || item.meme_tag || "";
+    const memeType = String(rawMemeType);
+    const memeLower = memeType.toLowerCase();
+
+    const rawKeywords = Array.isArray(item.keywords)
+      ? item.keywords
       : Array.isArray(item.tags)
-      ? item.tags.join(',')
-      : '';
+      ? item.tags
+      : [];
+    const keywordsArr = rawKeywords.map(k => String(k).toLowerCase().trim()).filter(Boolean);
+    const keywordsStr = keywordsArr.join(",");
 
-    section.dataset.type = typeList;
-    section.dataset.meme = memeTagLower;
-    section.dataset.keywords = keywords;
+    section.dataset.type = typeList;         // e.g. "ENTP, ESTP" or "NON-MBTI"
+    section.dataset.meme = memeLower;        // e.g. "they're the same picture"
+    section.dataset.keywords = keywordsStr;  // e.g. "entp,estp,mbti,myers briggs"
 
-    const title = escapeHtml(item.title || item.id || 'Untitled');
+    const title = escapeHtml(item.title || item.id || "Untitled");
     const pageUrl = item.page_url || `https://imgflip.com/i/${item.id}`;
-    const imageUrl = item.image_url || (item.id ? `https://i.imgflip.com/${item.id}.jpg` : '');
-    const views = typeof item.views === 'number' ? item.views : null;
+    const imageUrl = item.image_url || (item.id ? `https://i.imgflip.com/${item.id}.jpg` : "");
+    const views = typeof item.views === "number" ? item.views : null;
 
     section.innerHTML = `
       <div class="info-box">
         <div class="title-row">
           <h3>${title}</h3>
-          <p class="image-links">
-            <a href="${pageUrl}" target="_blank" rel="noopener">
-              <img src="images/imgflip.svg" alt="Imgflip link">
-            </a>
-            ${
-              memeTagLower
-                ? `<a href="https://knowyourmeme.com/search?q=${encodeURIComponent(memeType)}" target="_blank" rel="noopener">
-                     <img src="images/Know_Your_Meme.svg" alt="Know Your Meme">
-                   </a>`
-                : ''
-            }
-          </p>
-          ${views !== null ? `<span class="view-count">${numberWithCommas(views)} views</span>` : ``}
+          <div class="meta-row" style="display:flex;align-items:center;justify-content:space-between;gap:8px;">
+            <span class="view-count">${views !== null ? numberWithCommas(views) + " views" : ""}</span>
+            <p class="image-links" style="display:flex;align-items:center;gap:8px;margin:0;">
+              <a href="${pageUrl}" target="_blank" rel="noopener" title="Open on Imgflip">
+                <img src="images/imgflip.svg" alt="Imgflip link">
+              </a>
+              ${
+                memeLower
+                  ? `<a href="https://knowyourmeme.com/search?q=${encodeURIComponent(memeType)}" target="_blank" rel="noopener" title="Search on Know Your Meme">
+                       <img src="images/Know_Your_Meme.svg" alt="Know Your Meme">
+                     </a>`
+                  : ""
+              }
+            </p>
+          </div>
         </div>
         <div class="section-buttons"></div>
       </div>
@@ -82,234 +137,245 @@ async function bootstrap() {
       </div>
     `;
 
-    frag.appendChild(section);
-  }
+    const buttonsContainer = section.querySelector(".section-buttons");
+    if (buttonsContainer) {
+      const chipData = [];
+      // Type chips: ENTP, ESTP, NON-MBTI (no "Type: " prefix)
+      typeList
+        .split(/[\s,]+/)
+        .map(t => t.trim())
+        .filter(Boolean)
+        .forEach(t => {
+          const T = t.toUpperCase();
+          chipData.push({ type: "type", value: T, label: displayType(T) });
+        });
 
-  main.appendChild(frag);
+      // Meme type chip
+      if (memeLower) {
+        chipData.push({
+          type: "meme",
+          value: memeLower,
+          label: memeType
+        });
+      }
 
-  // 3) Build filters + per-section buttons
-  initFilters();
-}
+      // Keyword chips
+      keywordsArr.forEach(kw => {
+        chipData.push({
+          type: "keywords",
+          value: kw,
+          label: kw
+        });
+      });
 
-// ---------------- Filter/UI logic (adapted from your original) ----------------
+      // De-duplicate chips by (type,value)
+      const seen = new Set();
+      chipData.forEach(d => {
+        const key = `${d.type}:${d.value}`;
+        if (seen.has(key)) return;
+        seen.add(key);
 
-function initFilters() {
-  const sections = document.querySelectorAll('.content-section');
-  console.log('Found sections:', sections.length, 'Details:', Array.from(sections).map(s => ({
-    outerHTML: s.outerHTML.slice(0, 100),
-    dataset: s.dataset
-  })));
-
-  const containers = {
-    type: document.getElementById('type-buttons'),
-    meme: document.getElementById('meme-buttons'),
-    keywords: document.getElementById('keywords-buttons')
-  };
-  console.log(
-    'Container status:',
-    Object.fromEntries(
-      Object.entries(containers).map(([k, v]) => [k, v ? 'Present' : 'Missing'])
-    )
-  );
-
-  const types = new Set();
-  const keywordsSet = new Set();
-  const memes = new Set();
-
-  sections.forEach((section, idx) => {
-    console.log(`Processing section ${idx + 1} data:`, section.dataset);
-    if (section.dataset.type) {
-      const typeStr = section.dataset.type.toString().toUpperCase().trim();
-      typeStr.split(/[\s,]+/).forEach(t => {
-        const trimmedT = t.trim();
-        if (trimmedT) types.add(trimmedT);
+        const btn = document.createElement("button");
+        btn.textContent = d.label;
+        btn.dataset.filterType = d.type;
+        btn.dataset.value = d.value;
+        btn.addEventListener("click", () => filterSections(d.type, d.value));
+        buttonsContainer.appendChild(btn);
       });
     }
-    if (section.dataset.keywords) {
-      const keywordsStr = section.dataset.keywords.toString().toLowerCase().trim();
-      const keywordsArray = keywordsStr
-        .split(',')
-        .map(kw => kw.trim())
-        .filter(kw => kw.length > 0);
-      keywordsArray.forEach(kw => keywordsSet.add(kw));
-    }
-    if (section.dataset.meme) {
-      const memeStr = section.dataset.meme.toString().toLowerCase().trim();
-      if (memeStr) memes.add(memeStr);
+
+    frag.appendChild(section);
+  });
+
+  main.appendChild(frag);
+  sections = Array.from(document.querySelectorAll(".content-section"));
+}
+
+// ------------------------------------------------------------
+// Filters
+// ------------------------------------------------------------
+
+function initFilters() {
+  sections = Array.from(document.querySelectorAll(".content-section"));
+
+  const typeButtonsContainer = document.getElementById("type-buttons");
+  const memeButtonsContainer = document.getElementById("meme-buttons");
+  const keywordButtonsContainer = document.getElementById("keywords-buttons");
+
+  const typeOptions = new Set();     // UPPERCASE: ENTP, ESTP, NON-MBTI
+  const memeOptions = new Set();     // lowercase
+  const keywordOptions = new Set();  // lowercase
+
+  sections.forEach(section => {
+    const typeStr = (section.dataset.type || "").trim();
+    if (typeStr) {
+      typeStr
+        .split(/[\s,]+/)
+        .map(t => t.trim())
+        .filter(Boolean)
+        .forEach(t => typeOptions.add(t.toUpperCase()));
     }
 
-    const buttonsContainer = section.querySelector('.section-buttons');
-    if (buttonsContainer) {
-      const buttonData = [];
-      if (section.dataset.type) {
-        const typeStr = section.dataset.type.trim();
-        typeStr.split(/[\s,]+/).forEach(t => {
-          const tTrimmed = t.trim();
-          if (tTrimmed) {
-            const typeUpper = tTrimmed.toUpperCase();
-            buttonData.push({ type: 'type', value: typeUpper, label: `Type: ${typeUpper}` });
-          }
-        });
-      }
-      if (section.dataset.meme) {
-        const memeStr = section.dataset.meme.toLowerCase().trim();
-        if (memeStr) {
-          // Display the meme type in Title Case for buttons
-          const memeLabel = memeStr.split(' ').map(w => w ? w[0].toUpperCase() + w.slice(1) : w).join(' ');
-          buttonData.push({ type: 'meme', value: memeStr, label: memeLabel });
-        }
-      }
-      if (section.dataset.keywords) {
-        const keywordsStr = section.dataset.keywords.toLowerCase().trim();
-        const keywordsArray = keywordsStr
-          .split(',')
-          .map(kw => kw.trim())
-          .filter(kw => kw.length > 0);
-        keywordsArray.forEach(kw => {
-          if (kw) {
-            buttonData.push({ type: 'keywords', value: kw, label: kw });
-          }
-        });
-      }
+    const memeStr = (section.dataset.meme || "").toLowerCase().trim();
+    if (memeStr) memeOptions.add(memeStr);
 
-      if (buttonData.length) {
-        buttonsContainer.innerHTML = '';
-        buttonData.forEach(data => {
-          const button = document.createElement('button');
-          button.textContent = data.label;
-          button.dataset.filterType = data.type;
-          button.dataset.value = data.value;
-          button.addEventListener('click', () => filterSections(data.type, data.value));
-          buttonsContainer.appendChild(button);
-        });
-      }
+    const kwStr = (section.dataset.keywords || "").toLowerCase().trim();
+    if (kwStr) {
+      kwStr
+        .split(",")
+        .map(k => k.trim())
+        .filter(Boolean)
+        .forEach(k => keywordOptions.add(k));
     }
   });
 
-  const mbtiTypes = new Set([
-    'ESTP','ISTP','ESFP','ISFP','ESTJ','ISTJ','ESFJ','ISFJ',
-    'ENFP','INFP','ENFJ','INFJ','ENTJ','INTJ','ENTP','INTP'
-  ]);
-  mbtiTypes.forEach(t => types.add(t));
-  types.add('non-mbti');
-  types.add('All');
+  // Ensure all MBTI codes appear as options
+  MBTI_TYPES.forEach(t => typeOptions.add(t));
 
-  const sortedTypes = [...types].sort();
-  const sortedKeywords = [...keywordsSet].sort();
-  const sortedMemes = [...memes].sort();
-
-  function createButtons(container, values, filterType) {
-    if (container) {
-      const allButton = document.createElement('button');
-      allButton.textContent = 'All';
-      allButton.dataset.filterType = filterType;
-      allButton.dataset.value = 'all';
-      allButton.addEventListener('click', () => filterSections(filterType, 'all'));
-      container.replaceChildren(allButton);
-
-      values.forEach(value => {
-        if (value && typeof value === 'string') {
-          const button = document.createElement('button');
-          const displayText =
-            filterType === 'type'
-              ? value === 'non-mbti' || value === 'All'
-                ? value
-                : value.toUpperCase()
-              : value.split(' ').map(w => w ? w[0].toUpperCase() + w.slice(1) : w).join(' ');
-          button.textContent = displayText;
-          button.dataset.filterType = filterType;
-          button.dataset.value = value;
-          button.addEventListener('click', () => filterSections(filterType, value));
-          container.appendChild(button);
-        }
-      });
-    }
+  // If any section is non-mbti, ensure we have exactly one NON-MBTI option
+  if (sections.some(s => (s.dataset.type || "").toUpperCase().includes("NON-MBTI"))) {
+    typeOptions.add("NON-MBTI");
   }
 
-  createButtons(containers.type, sortedTypes, 'type');
-  createButtons(containers.meme, sortedMemes, 'meme');
-  createButtons(containers.keywords, sortedKeywords, 'keywords');
-
-  let currentFilters = { type: 'all', meme: 'all', keywords: 'all' };
-
-  function filterSections(filterType, value) {
-    console.log(`Filtering ${filterType} with value:`, value);
-    currentFilters[filterType] = value === currentFilters[filterType] ? 'all' : value;
-    console.log('Current filters:', currentFilters);
-
-    // Update button active states for this filter type
-    document.querySelectorAll(`button[data-filter-type="${filterType}"]`).forEach(btn => {
-      const btnValue = btn.dataset.value;
-      const isActive = btnValue === currentFilters[filterType] && currentFilters[filterType] !== 'all';
-      btn.classList.toggle('active', isActive);
-      btn.setAttribute('aria-pressed', isActive);
-    });
-
-    const mbtiTypesSet = new Set([
-      'ESTP','ISTP','ESFP','ISFP','ESTJ','ISTJ','ESFJ','ISFJ',
-      'ENFP','INFP','ENFJ','INFJ','ENTJ','INTJ','ENTP','INTP'
-    ]);
-
-    sections.forEach(section => {
-      section.classList.remove('hidden');
-      const activeFilter = Object.entries(currentFilters).find(([_, val]) => val !== 'all');
-      let matches = !activeFilter;
-      let sectionValue = '';
-
-      if (activeFilter) {
-        const [activeType, activeValue] = activeFilter;
-
-        if (activeType === 'type') {
-          sectionValue = section.dataset.type ? section.dataset.type.toUpperCase().trim() : '';
-          if (activeValue === 'non-mbti') {
-            matches = !sectionValue.split(/[\s,]+/).some(t => mbtiTypesSet.has(t));
-          } else if (activeValue === 'All') {
-            matches = true;
-          } else {
-            matches = sectionValue.split(/[\s,]+/).includes(activeValue);
-          }
-        } else if (activeType === 'meme') {
-          sectionValue = section.dataset.meme ? section.dataset.meme.toLowerCase().trim() : '';
-          matches = sectionValue === activeValue;
-        } else if (activeType === 'keywords') {
-          sectionValue = section.dataset.keywords ? section.dataset.keywords.toLowerCase().trim() : '';
-          const keywordsArray = sectionValue
-            .split(',')
-            .map(kw => kw.trim())
-            .filter(kw => kw.length > 0);
-          if (activeValue && activeValue.includes(' ')) {
-            matches = keywordsArray.some(kw => kw === activeValue);
-          } else if (activeValue) {
-            matches = keywordsArray.some(kw => kw.includes(activeValue));
-          } else {
-            matches = false;
-          }
-        }
-        console.log(`Checking ${activeType}='${activeValue}' against section value='${sectionValue}': ${matches}`);
-      }
-
-      section.classList.toggle('hidden', !matches);
-    });
-  }
-
-  // Initialize all filters to 'all'
-  Object.keys(currentFilters).forEach(filter => filterSections(filter, 'all'));
+  // Build buttons
+  buildFilterButtons(typeButtonsContainer, Array.from(typeOptions).sort(), "type");
+  buildFilterButtons(memeButtonsContainer, Array.from(memeOptions).sort(), "meme");
+  buildFilterButtons(keywordButtonsContainer, Array.from(keywordOptions).sort(), "keywords");
 }
 
-// ---------------- Utilities ----------------
+function buildFilterButtons(container, values, filterType) {
+  if (!container) return;
+
+  container.innerHTML = "";
+
+  // All button
+  const allBtn = document.createElement("button");
+  allBtn.textContent = "All";
+  allBtn.dataset.filterType = filterType;
+  allBtn.dataset.value = "all";
+  allBtn.addEventListener("click", () => filterSections(filterType, "all"));
+  container.appendChild(allBtn);
+
+  // Specific values
+  values.forEach(val => {
+    if (!val || typeof val !== "string") return;
+    const btn = document.createElement("button");
+    btn.dataset.filterType = filterType;
+
+    if (filterType === "type") {
+      const upper = val.toUpperCase();
+      btn.dataset.value = upper;
+      btn.textContent = displayType(upper);
+    } else if (filterType === "meme") {
+      btn.dataset.value = val;
+      btn.textContent = toTitleCase(val);
+    } else {
+      btn.dataset.value = val;
+      btn.textContent = val;
+    }
+
+    btn.addEventListener("click", () =>
+      filterSections(filterType, btn.dataset.value)
+    );
+    container.appendChild(btn);
+  });
+}
+
+function filterSections(filterType, value) {
+  if (!sections || !sections.length) {
+    sections = Array.from(document.querySelectorAll(".content-section"));
+  }
+
+  // Toggle behaviour: clicking the same value again resets to 'all'
+  currentFilters[filterType] =
+    value === currentFilters[filterType] ? "all" : value;
+
+  // Update button states
+  document
+    .querySelectorAll(`button[data-filter-type="${filterType}"]`)
+    .forEach(btn => {
+      const isActive =
+        btn.dataset.value === currentFilters[filterType] &&
+        currentFilters[filterType] !== "all";
+      btn.classList.toggle("active", isActive);
+      btn.setAttribute("aria-pressed", isActive ? "true" : "false");
+    });
+
+  sections.forEach(section => {
+    let matches = true;
+
+    for (const [fType, fVal] of Object.entries(currentFilters)) {
+      if (fVal === "all") continue;
+
+      if (fType === "type") {
+        const secVal = (section.dataset.type || "").toUpperCase().trim();
+        const secTypes = secVal
+          .split(/[\s,]+/)
+          .map(t => t.trim())
+          .filter(Boolean);
+
+        if (fVal === "NON-MBTI") {
+          // Match sections that have NO MBTI type tag
+          matches = !secTypes.some(t => MBTI_SET.has(t));
+        } else {
+          matches = secTypes.includes(fVal);
+        }
+      } else if (fType === "meme") {
+        const secVal = (section.dataset.meme || "").toLowerCase().trim();
+        matches = secVal === fVal;
+      } else if (fType === "keywords") {
+        const secVal = (section.dataset.keywords || "").toLowerCase().trim();
+        const kws = secVal
+          .split(",")
+          .map(k => k.trim())
+          .filter(Boolean);
+        if (fVal.includes(" ")) {
+          matches = kws.some(kw => kw === fVal);
+        } else {
+          matches = kws.some(kw => kw.includes(fVal));
+        }
+      }
+
+      if (!matches) break;
+    }
+
+    section.classList.toggle("hidden", !matches);
+  });
+}
+
+// ------------------------------------------------------------
+// Small helpers
+// ------------------------------------------------------------
 
 function escapeHtml(s) {
-  return String(s).replace(/[&<>"']/g, c => ({
-    '&': '&amp;',
-    '<': '&lt;',
-    '>': '&gt;',
-    '"': '&quot;',
-    "'": '&#39;'
-  })[c]);
+  return String(s).replace(/[&<>"']/g, c => {
+    switch (c) {
+      case "&": return "&amp;";
+      case "<": return "&lt;";
+      case ">": return "&gt;";
+      case '"': return "&quot;";
+      case "'": return "&#39;";
+      default: return c;
+    }
+  });
 }
 
 function numberWithCommas(x) {
   const n = Number(x);
   if (!Number.isFinite(n)) return String(x);
-  return n.toLocaleString('en-US');
+  return n.toLocaleString("en-US");
+}
+
+function toTitleCase(s) {
+  return String(s)
+    .trim()
+    .toLowerCase()
+    .split(/\s+/)
+    .map(w => (w ? w[0].toUpperCase() + w.slice(1) : w))
+    .join(" ");
+}
+
+function displayType(upper) {
+  if (upper === "NON-MBTI") return "Non-MBTI";
+  return upper;
 }
