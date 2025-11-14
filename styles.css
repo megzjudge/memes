@@ -356,12 +356,11 @@ a {
 .imgflip-icon.owned::after {
     content: "";
     position: absolute;
-    top: 6px;
-    left: 6px;
-    right: 6px;
-    bottom: 6px;
+    left: 3px;
+    right: 3px;
+    top: 50%;
     border-top: 2px solid rgba(0, 0, 0, 0.75);
-    transform: rotate(-30deg);
+    transform: translateY(-50%) rotate(-25deg);
     pointer-events: none;
 }
 
