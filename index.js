@@ -1,9 +1,10 @@
 // index.js
-// - Fetches featured-only feed from the Worker.
+// - Fetches all memes from the Worker.
 // - Dynamically renders all <section class="content-section">.
-// - HTML entities (apostrophes) are decoded in the Worker.
-// - Type chips: ENTP / ESTP / NON-MBTI (no "Type:").
-// - Views on the left, Imgflip + KYM icons on the right.
+// - MBTI chips: ENTP / ESTP / NON-MBTI (no "Type:").
+// - Sort controls:
+//   * Age toggle: default "Newest first", click → "Oldest first".
+//   * Sort by views: highest views first when active.
 
 const FEED_BASE = "https://rapid-math-6088.touch-97a.workers.dev";
 
@@ -12,6 +13,11 @@ const currentFilters = {
   type: "all",
   meme: "all",
   keywords: "all"
+};
+
+let sortState = {
+  mode: "age",        // "age" | "views"
+  ageDirection: "newest" // "newest" | "oldest"
 };
 
 const MBTI_TYPES = [
@@ -40,6 +46,7 @@ async function bootstrap() {
     return;
   }
   renderSections(items);
+  initSortControls();
   initFilters();
 }
 
@@ -75,7 +82,7 @@ function renderSections(items) {
   main.innerHTML = "";
   const frag = document.createDocumentFragment();
 
-  items.forEach(item => {
+  items.forEach((item, idx) => {
     const section = document.createElement("section");
     section.className = "content-section";
 
@@ -101,18 +108,21 @@ function renderSections(items) {
     section.dataset.type = typeList;
     section.dataset.meme = memeLower;
     section.dataset.keywords = keywordsStr;
+    section.dataset.index = String(idx); // 0 = newest, increasing toward oldest
+    const views = typeof item.views === "number" ? item.views : 0;
+    section.dataset.views = String(views);
 
     const title = escapeHtml(item.title || item.id || "Untitled");
     const pageUrl = item.page_url || `https://imgflip.com/i/${item.id}`;
-    const imageUrl = item.image_url || (item.id ? `https://i.imgflip.com/${item.id}.jpg` : "");
-    const views = typeof item.views === "number" ? item.views : null;
+    const imageUrl =
+      item.image_url || (item.id ? `https://i.imgflip.com/${item.id}.jpg` : "");
 
     section.innerHTML = `
       <div class="info-box">
         <div class="title-row">
           <h3>${title}</h3>
           <div class="meta-row" style="display:flex;align-items:center;justify-content:space-between;gap:8px;">
-            <span class="view-count">${views !== null ? numberWithCommas(views) + " views" : ""}</span>
+            <span class="view-count">${views ? numberWithCommas(views) + " views" : ""}</span>
             <p class="image-links" style="display:flex;align-items:center;gap:8px;margin:0;">
               <a href="${pageUrl}" target="_blank" rel="noopener" title="Open on Imgflip">
                 <img src="images/imgflip.svg" alt="Imgflip link">
@@ -148,6 +158,7 @@ function renderSections(items) {
           chipData.push({ type: "type", value: T, label: displayType(T) });
         });
 
+      // meme type chip
       if (memeLower) {
         chipData.push({
           type: "meme",
@@ -156,6 +167,7 @@ function renderSections(items) {
         });
       }
 
+      // keyword chips
       keywordsArr.forEach(kw => {
         chipData.push({
           type: "keywords",
@@ -184,6 +196,116 @@ function renderSections(items) {
 
   main.appendChild(frag);
   sections = Array.from(document.querySelectorAll(".content-section"));
+}
+
+// ---------------- sort controls ----------------
+
+function initSortControls() {
+  const filterContainer = document.querySelector(".filter-container");
+  if (!filterContainer) return;
+
+  let sortRow = document.querySelector(".sort-row");
+  if (!sortRow) {
+    sortRow = document.createElement("div");
+    sortRow.className = "filter-row sort-row";
+    sortRow.innerHTML = `
+      <h4>Sort:</h4>
+      <div id="sort-buttons"></div>
+    `;
+    filterContainer.appendChild(sortRow);
+  }
+
+  const sortButtonsContainer = document.getElementById("sort-buttons");
+  if (!sortButtonsContainer) return;
+  sortButtonsContainer.innerHTML = "";
+
+  const ageBtn = document.createElement("button");
+  ageBtn.id = "sort-age-btn";
+  ageBtn.type = "button";
+  ageBtn.textContent = "Newest first";
+  ageBtn.addEventListener("click", () => {
+    // clicking age always sets mode to "age"
+    if (sortState.mode === "age") {
+      // toggle direction
+      sortState.ageDirection =
+        sortState.ageDirection === "newest" ? "oldest" : "newest";
+    } else {
+      sortState.mode = "age";
+      sortState.ageDirection = "newest";
+    }
+    updateSortButtonsUI();
+    applySort();
+  });
+
+  const viewsBtn = document.createElement("button");
+  viewsBtn.id = "sort-views-btn";
+  viewsBtn.type = "button";
+  viewsBtn.textContent = "Sort by views";
+  viewsBtn.addEventListener("click", () => {
+    // toggle between views and age (newest)
+    if (sortState.mode === "views") {
+      sortState.mode = "age";
+      sortState.ageDirection = "newest";
+    } else {
+      sortState.mode = "views";
+    }
+    updateSortButtonsUI();
+    applySort();
+  });
+
+  sortButtonsContainer.appendChild(ageBtn);
+  sortButtonsContainer.appendChild(viewsBtn);
+
+  updateSortButtonsUI();
+  // No need to call applySort() here: initial DOM order is newest-first already.
+}
+
+function applySort() {
+  const main = document.querySelector("main");
+  if (!main) return;
+  const nodes = Array.from(main.querySelectorAll(".content-section"));
+  if (!nodes.length) return;
+
+  const sorted = [...nodes].sort((a, b) => {
+    const idxA = Number(a.dataset.index || 0);
+    const idxB = Number(b.dataset.index || 0);
+
+    if (sortState.mode === "views") {
+      const vA = Number(a.dataset.views || 0);
+      const vB = Number(b.dataset.views || 0);
+      if (vB !== vA) return vB - vA; // highest views first
+      return idxA - idxB;           // tie-breaker: newest first
+    } else {
+      // age sort
+      if (sortState.ageDirection === "newest") {
+        // 0 = newest
+        return idxA - idxB;
+      } else {
+        return idxB - idxA;
+      }
+    }
+  });
+
+  sorted.forEach(node => main.appendChild(node));
+}
+
+function updateSortButtonsUI() {
+  const ageBtn = document.getElementById("sort-age-btn");
+  const viewsBtn = document.getElementById("sort-views-btn");
+
+  if (ageBtn) {
+    ageBtn.textContent =
+      sortState.ageDirection === "newest" ? "Newest first" : "Oldest first";
+    const active = sortState.mode === "age";
+    ageBtn.classList.toggle("active", active);
+    ageBtn.setAttribute("aria-pressed", active ? "true" : "false");
+  }
+
+  if (viewsBtn) {
+    const active = sortState.mode === "views";
+    viewsBtn.classList.toggle("active", active);
+    viewsBtn.setAttribute("aria-pressed", active ? "true" : "false");
+  }
 }
 
 // ---------------- filters ----------------
