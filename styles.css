@@ -69,14 +69,16 @@ header p {
 }
 
 .filter-row {
-  align-items: center;
-  gap: 0.75rem;
-  margin-bottom: 0.75rem;
+    display: block;
+    align-items: center;
+    gap: 0.75rem;
+    margin-bottom: 0.75rem;
 }
 
-.filter-row h4 {
-    padding: 0.5rem 0;
+.filter-row h4, #sort-buttons h4 {
+    padding: 1.3rem 0;
     background-color: transparent;
+    text-align: left;
     margin-bottom: 0;
     margin: 0;
     font-size: 0.9rem;
@@ -100,13 +102,7 @@ header p {
   font-size: 0.9rem;      /* same font size as other chips */
   border-radius: 999px;
   border: 1px solid #ccc;
-  background: #fff;
   cursor: pointer;
-}
-
-#sort-buttons button.active {
-  border-color: #8b5cf6;
-  background: #f3e8ff;
 }
 
 #type-buttons, #meme-buttons, #keywords-buttons {
@@ -129,7 +125,7 @@ header p {
     box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
 }
 
-.filter-container button.active {
+.filter-container button.active, #sort-buttons button.active {
     background-color: rgba(131, 185, 204, 0.2);
     color: #e0d7f7;
     border-color: #83b9cc;
