@@ -1,10 +1,66 @@
 // index.js
-// - Fetches all memes from the Worker.
-// - Dynamically renders all <section class="content-section">.
-// - MBTI chips: ENTP / ESTP / NON-MBTI (no "Type:").
-// - Sort controls:
-//   * Age toggle: default "Newest first", click → "Oldest first".
-//   * Sort by views: highest views first when active.
+
+// ------------ Imgflip icons (top of page) ------------
+
+const IMGFLIP_ICONS = [
+  { id: 1,  file: "images/icon_1.svg",  label: "Icon 1" },
+  { id: 2,  file: "images/icon_2.svg",  label: "Icon 2" },
+  { id: 3,  file: "images/icon_3.svg",  label: "Icon 3" },
+  { id: 4,  file: "images/icon_4.svg",  label: "Icon 4" },
+  { id: 5,  file: "images/icon_5.svg",  label: "Icon 5" },
+  { id: 6,  file: "images/icon_6.svg",  label: "Icon 6" },
+  { id: 7,  file: "images/icon_7.svg",  label: "Icon 7" },
+  { id: 8,  file: "images/icon_8.svg",  label: "Icon 8" },
+  { id: 9,  file: "images/icon_9.svg",  label: "Icon 9" },
+  { id: 10, file: "images/icon_10.svg", label: "Icon 10" },
+  { id: 11, file: "images/icon_11.svg", label: "Icon 11" },
+  { id: 12, file: "images/icon_12.svg", label: "Icon 12" }, // current
+  { id: 13, file: "images/icon_13.svg", label: "Icon 13" }  // goal
+];
+
+// how many icons you currently own
+const IMGFLIP_MAX_OWNED_ICON_ID = 12;
+// which one is currently selected on Imgflip
+const IMGFLIP_CURRENT_ICON_ID = 12;
+
+function setupImgflipIcons() {
+  const currentContainer = document.getElementById("current-imgflip-icon");
+  const rowContainer = document.getElementById("imgflip-icon-row");
+  if (!currentContainer && !rowContainer) return;
+
+  IMGFLIP_ICONS.forEach(icon => {
+    const owned = icon.id <= IMGFLIP_MAX_OWNED_ICON_ID;
+    const isCurrent = icon.id === IMGFLIP_CURRENT_ICON_ID;
+
+    if (rowContainer) {
+      const wrapper = document.createElement("div");
+      wrapper.classList.add("imgflip-icon");
+      wrapper.classList.add(owned ? "owned" : "locked");
+      if (isCurrent) wrapper.classList.add("current");
+
+      const img = document.createElement("img");
+      img.src = icon.file;
+      img.alt = `${icon.label} (Imgflip icon ${icon.id})`;
+      wrapper.appendChild(img);
+
+      const label = document.createElement("span");
+      label.classList.add("imgflip-icon-label");
+      label.textContent = icon.label;
+      wrapper.appendChild(label);
+
+      rowContainer.appendChild(wrapper);
+    }
+
+    if (isCurrent && currentContainer) {
+      const img = document.createElement("img");
+      img.src = icon.file;
+      img.alt = `Current Imgflip icon: ${icon.label}`;
+      currentContainer.appendChild(img);
+    }
+  });
+}
+
+// ------------ Meme feed + filters + sort ------------
 
 const FEED_BASE = "https://rapid-math-6088.touch-97a.workers.dev";
 
@@ -16,7 +72,7 @@ const currentFilters = {
 };
 
 let sortState = {
-  mode: "age",        // "age" | "views"
+  mode: "age",           // "age" | "views"
   ageDirection: "newest" // "newest" | "oldest"
 };
 
@@ -33,6 +89,9 @@ document.addEventListener("DOMContentLoaded", () => {
     "Script loaded at",
     new Date().toLocaleString("en-AU", { timeZone: "Australia/Sydney" })
   );
+
+  setupImgflipIcons();
+
   bootstrap().catch(err => {
     console.error("Bootstrap failed:", err);
     showEmpty("No memes found.");
@@ -50,7 +109,7 @@ async function bootstrap() {
   initFilters();
 }
 
-// ---------------- fetch feed ----------------
+// ---------- fetch feed ----------
 
 async function fetchFeed() {
   const url = `${FEED_BASE}/feed?fresh=1`;
@@ -67,7 +126,7 @@ async function fetchFeed() {
   return items;
 }
 
-// ---------------- rendering ----------------
+// ---------- rendering ----------
 
 function showEmpty(msg) {
   const main = document.querySelector("main");
@@ -108,7 +167,7 @@ function renderSections(items) {
     section.dataset.type = typeList;
     section.dataset.meme = memeLower;
     section.dataset.keywords = keywordsStr;
-    section.dataset.index = String(idx); // 0 = newest, increasing toward oldest
+    section.dataset.index = String(idx); // 0 = newest
     const views = typeof item.views === "number" ? item.views : 0;
     section.dataset.views = String(views);
 
@@ -148,7 +207,7 @@ function renderSections(items) {
     if (buttonsContainer) {
       const chipData = [];
 
-      // type chips: ENTP / ESTP / NON-MBTI
+      // MBTI type chips
       typeList
         .split(/[\s,]+/)
         .map(t => t.trim())
@@ -158,7 +217,7 @@ function renderSections(items) {
           chipData.push({ type: "type", value: T, label: displayType(T) });
         });
 
-      // meme type chip
+      // Meme type chip
       if (memeLower) {
         chipData.push({
           type: "meme",
@@ -167,7 +226,7 @@ function renderSections(items) {
         });
       }
 
-      // keyword chips
+      // Keyword chips (including those that happen to be MBTI strings)
       keywordsArr.forEach(kw => {
         chipData.push({
           type: "keywords",
@@ -186,7 +245,18 @@ function renderSections(items) {
         btn.textContent = d.label;
         btn.dataset.filterType = d.type;
         btn.dataset.value = d.value;
-        btn.addEventListener("click", () => filterSections(d.type, d.value));
+
+        if (d.type === "type") {
+          btn.classList.add("chip-type");
+        } else if (d.type === "meme") {
+          btn.classList.add("chip-meme");
+        } else if (d.type === "keywords") {
+          btn.classList.add("chip-keyword");
+        }
+
+        btn.addEventListener("click", () =>
+          filterSections(d.type, d.value)
+        );
         buttonsContainer.appendChild(btn);
       });
     }
@@ -198,7 +268,7 @@ function renderSections(items) {
   sections = Array.from(document.querySelectorAll(".content-section"));
 }
 
-// ---------------- sort controls ----------------
+// ---------- sort controls (now at top) ----------
 
 function initSortControls() {
   const filterContainer = document.querySelector(".filter-container");
@@ -212,7 +282,14 @@ function initSortControls() {
       <h4>Sort:</h4>
       <div id="sort-buttons"></div>
     `;
-    filterContainer.appendChild(sortRow);
+
+    // insert at top of filter-container
+    const firstRow = filterContainer.querySelector(".filter-row");
+    if (firstRow) {
+      filterContainer.insertBefore(sortRow, firstRow);
+    } else {
+      filterContainer.appendChild(sortRow);
+    }
   }
 
   const sortButtonsContainer = document.getElementById("sort-buttons");
@@ -224,9 +301,7 @@ function initSortControls() {
   ageBtn.type = "button";
   ageBtn.textContent = "Newest first";
   ageBtn.addEventListener("click", () => {
-    // clicking age always sets mode to "age"
     if (sortState.mode === "age") {
-      // toggle direction
       sortState.ageDirection =
         sortState.ageDirection === "newest" ? "oldest" : "newest";
     } else {
@@ -242,7 +317,6 @@ function initSortControls() {
   viewsBtn.type = "button";
   viewsBtn.textContent = "Sort by views";
   viewsBtn.addEventListener("click", () => {
-    // toggle between views and age (newest)
     if (sortState.mode === "views") {
       sortState.mode = "age";
       sortState.ageDirection = "newest";
@@ -257,7 +331,6 @@ function initSortControls() {
   sortButtonsContainer.appendChild(viewsBtn);
 
   updateSortButtonsUI();
-  // No need to call applySort() here: initial DOM order is newest-first already.
 }
 
 function applySort() {
@@ -273,13 +346,11 @@ function applySort() {
     if (sortState.mode === "views") {
       const vA = Number(a.dataset.views || 0);
       const vB = Number(b.dataset.views || 0);
-      if (vB !== vA) return vB - vA; // highest views first
-      return idxA - idxB;           // tie-breaker: newest first
+      if (vB !== vA) return vB - vA; // high views first
+      return idxA - idxB;
     } else {
-      // age sort
       if (sortState.ageDirection === "newest") {
-        // 0 = newest
-        return idxA - idxB;
+        return idxA - idxB; // 0 = newest
       } else {
         return idxB - idxA;
       }
@@ -308,7 +379,7 @@ function updateSortButtonsUI() {
   }
 }
 
-// ---------------- filters ----------------
+// ---------- filters ----------
 
 function initFilters() {
   sections = Array.from(document.querySelectorAll(".content-section"));
@@ -340,19 +411,40 @@ function initFilters() {
         .split(",")
         .map(k => k.trim())
         .filter(Boolean)
-        .forEach(k => keywordOptions.add(k));
+        .forEach(k => {
+          const upper = k.toUpperCase();
+          // do NOT include MBTI types as global keyword filters
+          if (MBTI_SET.has(upper)) return;
+          keywordOptions.add(k);
+        });
     }
   });
 
   MBTI_TYPES.forEach(t => typeOptions.add(t));
 
-  if (sections.some(s => (s.dataset.type || "").toUpperCase().includes("NON-MBTI"))) {
+  if (
+    sections.some(s =>
+      (s.dataset.type || "").toUpperCase().includes("NON-MBTI")
+    )
+  ) {
     typeOptions.add("NON-MBTI");
   }
 
-  buildFilterButtons(typeButtonsContainer, Array.from(typeOptions).sort(), "type");
-  buildFilterButtons(memeButtonsContainer, Array.from(memeOptions).sort(), "meme");
-  buildFilterButtons(keywordButtonsContainer, Array.from(keywordOptions).sort(), "keywords");
+  buildFilterButtons(
+    typeButtonsContainer,
+    Array.from(typeOptions).sort(),
+    "type"
+  );
+  buildFilterButtons(
+    memeButtonsContainer,
+    Array.from(memeOptions).sort(),
+    "meme"
+  );
+  buildFilterButtons(
+    keywordButtonsContainer,
+    Array.from(keywordOptions).sort(),
+    "keywords"
+  );
 }
 
 function buildFilterButtons(container, values, filterType) {
@@ -364,7 +456,9 @@ function buildFilterButtons(container, values, filterType) {
   allBtn.textContent = "All";
   allBtn.dataset.filterType = filterType;
   allBtn.dataset.value = "all";
-  allBtn.addEventListener("click", () => filterSections(filterType, "all"));
+  allBtn.addEventListener("click", () =>
+    filterSections(filterType, "all")
+  );
   container.appendChild(allBtn);
 
   values.forEach(val => {
@@ -450,17 +544,23 @@ function filterSections(filterType, value) {
   });
 }
 
-// ---------------- helpers ----------------
+// ---------- helpers ----------
 
 function escapeHtml(s) {
   return String(s).replace(/[&<>"']/g, c => {
     switch (c) {
-      case "&": return "&amp;";
-      case "<": return "&lt;";
-      case ">": return "&gt;";
-      case '"': return "&quot;";
-      case "'": return "&#39;";
-      default: return c;
+      case "&":
+        return "&amp;";
+      case "<":
+        return "&lt;";
+      case ">":
+        return "&gt;";
+      case '"':
+        return "&quot;";
+      case "'":
+        return "&#39;";
+      default:
+        return c;
     }
   });
 }

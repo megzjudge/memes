@@ -331,6 +331,67 @@ a {
     100% { transform: rotate(360deg); }
 }
 
+.imgflip-icon-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    align-items: center;
+    margin: 0.5rem 0 1rem;
+    font-size: 0.75rem;
+}
+
+.imgflip-icon {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 2px;
+}
+
+.imgflip-icon img {
+    width: 24px;
+    height: 24px;
+    display: block;
+}
+
+.imgflip-icon-label {
+    font-size: 0.7rem;
+}
+
+/* Current icon (the one you're using right now) */
+.imgflip-icon.current img {
+    width: 28px;
+    height: 28px;
+    box-shadow: 0 0 0 2px #f4c542;
+    border-radius: 4px;
+}
+
+/* Icons you already have: show a diagonal slash through them */
+.imgflip-icon.owned::after {
+    content: "";
+    position: absolute;
+    top: 2px;
+    left: 2px;
+    right: 2px;
+    bottom: 12px;
+    border-top: 2px solid rgba(0, 0, 0, 0.75);
+    transform: rotate(-30deg);
+    pointer-events: none;
+}
+
+/* Icons you don't have yet – fade them slightly */
+.imgflip-icon.locked img {
+    opacity: 0.35;
+}
+
+/* Current icon next to "@mbtininja" text */
+#current-imgflip-icon img {
+    width: 20px;
+    height: 20px;
+    vertical-align: middle;
+    margin-left: 6px;
+}
+
 footer {
     text-align: center;
     color: #e0d7f7;
