@@ -1,21 +1,21 @@
-// index.js
-
 // ------------ Imgflip icons (top of page) ------------
 
+const IMGFLIP_PROFILE_URL = "https://imgflip.com/user/mbtininja";
+
 const IMGFLIP_ICONS = [
-  { id: 1,  file: "images/icon_1.svg",  label: "Icon 1" },
-  { id: 2,  file: "images/icon_2.svg",  label: "Icon 2" },
-  { id: 3,  file: "images/icon_3.svg",  label: "Icon 3" },
-  { id: 4,  file: "images/icon_4.svg",  label: "Icon 4" },
-  { id: 5,  file: "images/icon_5.svg",  label: "Icon 5" },
-  { id: 6,  file: "images/icon_6.svg",  label: "Icon 6" },
-  { id: 7,  file: "images/icon_7.svg",  label: "Icon 7" },
-  { id: 8,  file: "images/icon_8.svg",  label: "Icon 8" },
-  { id: 9,  file: "images/icon_9.svg",  label: "Icon 9" },
-  { id: 10, file: "images/icon_10.svg", label: "Icon 10" },
-  { id: 11, file: "images/icon_11.svg", label: "Icon 11" },
-  { id: 12, file: "images/icon_12.svg", label: "Icon 12" }, // current
-  { id: 13, file: "images/icon_13.svg", label: "Icon 13" }  // goal
+  { id: 1,  file: "images/icon_1.svg",  label: "0" },
+  { id: 2,  file: "images/icon_2.svg",  label: "250" },
+  { id: 3,  file: "images/icon_3.svg",  label: "500" },
+  { id: 4,  file: "images/icon_4.svg",  label: "1k" },
+  { id: 5,  file: "images/icon_5.svg",  label: "2k" },
+  { id: 6,  file: "images/icon_6.svg",  label: "3k" },
+  { id: 7,  file: "images/icon_7.svg",  label: "5k" },
+  { id: 8,  file: "images/icon_8.svg",  label: "7k" },
+  { id: 9,  file: "images/icon_9.svg",  label: "8k" },
+  { id: 10, file: "images/icon_10.svg", label: "10k" },
+  { id: 11, file: "images/icon_11.svg", label: "15k" },
+  { id: 12, file: "images/icon_12.svg", label: "20k" }, // current
+  { id: 13, file: "images/icon_13.svg", label: "30k" }  // goal
 ];
 
 // how many icons you currently own
@@ -28,21 +28,46 @@ function setupImgflipIcons() {
   const rowContainer = document.getElementById("imgflip-icon-row");
   if (!currentContainer && !rowContainer) return;
 
+  // Prefix text: "Views icon:"
+  if (rowContainer) {
+    const prefix = document.createElement("span");
+    prefix.classList.add("imgflip-icon-prefix");
+    prefix.textContent = "Views icon:";
+    rowContainer.appendChild(prefix);
+  }
+
   IMGFLIP_ICONS.forEach(icon => {
     const owned = icon.id <= IMGFLIP_MAX_OWNED_ICON_ID;
     const isCurrent = icon.id === IMGFLIP_CURRENT_ICON_ID;
 
+    // Icons row under the header text
     if (rowContainer) {
       const wrapper = document.createElement("div");
       wrapper.classList.add("imgflip-icon");
-      wrapper.classList.add(owned ? "owned" : "locked");
-      if (isCurrent) wrapper.classList.add("current");
+
+      // owned but NOT current → strike
+      if (owned && !isCurrent) {
+        wrapper.classList.add("owned");
+      } else if (!owned) {
+        wrapper.classList.add("locked");
+      }
+      if (isCurrent) {
+        wrapper.classList.add("current");
+      }
+
+      const link = document.createElement("a");
+      link.href = IMGFLIP_PROFILE_URL;
+      link.target = "_blank";
+      link.rel = "noopener";
 
       const img = document.createElement("img");
       img.src = icon.file;
-      img.alt = `${icon.label} (Imgflip icon ${icon.id})`;
-      wrapper.appendChild(img);
+      img.alt = `Views threshold: ${icon.label}`;
+      link.appendChild(img);
 
+      wrapper.appendChild(link);
+
+      // numeric label only (no "icon" word)
       const label = document.createElement("span");
       label.classList.add("imgflip-icon-label");
       label.textContent = icon.label;
@@ -51,11 +76,19 @@ function setupImgflipIcons() {
       rowContainer.appendChild(wrapper);
     }
 
+    // The single current icon next to "@mbtininja"
     if (isCurrent && currentContainer) {
+      const link = document.createElement("a");
+      link.href = IMGFLIP_PROFILE_URL;
+      link.target = "_blank";
+      link.rel = "noopener";
+
       const img = document.createElement("img");
       img.src = icon.file;
-      img.alt = `Current Imgflip icon: ${icon.label}`;
-      currentContainer.appendChild(img);
+      img.alt = `Current views icon: ${icon.label}`;
+      link.appendChild(img);
+
+      currentContainer.appendChild(link);
     }
   });
 }
@@ -226,7 +259,7 @@ function renderSections(items) {
         });
       }
 
-      // Keyword chips (including those that happen to be MBTI strings)
+      // Keyword chips (including ones that are also MBTI strings)
       keywordsArr.forEach(kw => {
         chipData.push({
           type: "keywords",
@@ -250,8 +283,6 @@ function renderSections(items) {
           btn.classList.add("chip-type");
         } else if (d.type === "meme") {
           btn.classList.add("chip-meme");
-        } else if (d.type === "keywords") {
-          btn.classList.add("chip-keyword");
         }
 
         btn.addEventListener("click", () =>
@@ -268,7 +299,7 @@ function renderSections(items) {
   sections = Array.from(document.querySelectorAll(".content-section"));
 }
 
-// ---------- sort controls (now at top) ----------
+// ---------- sort controls (top) ----------
 
 function initSortControls() {
   const filterContainer = document.querySelector(".filter-container");
@@ -283,7 +314,6 @@ function initSortControls() {
       <div id="sort-buttons"></div>
     `;
 
-    // insert at top of filter-container
     const firstRow = filterContainer.querySelector(".filter-row");
     if (firstRow) {
       filterContainer.insertBefore(sortRow, firstRow);
