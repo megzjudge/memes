@@ -32,7 +32,7 @@ function setupImgflipIcons() {
   if (rowContainer) {
     const prefix = document.createElement("span");
     prefix.classList.add("imgflip-icon-prefix");
-    prefix.textContent = "Views icon:";
+    prefix.textContent = "Views:";
     rowContainer.appendChild(prefix);
   }
 
