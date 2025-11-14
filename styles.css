@@ -92,7 +92,7 @@ header p {
 }
 
 .filter-container button {
-    margin: 0; /* Removed margin to rely on parent gap */
+    margin: 0;
     padding: 8px 12px;
     border: 1px solid #e0d7f7;
     background-color: transparent;
@@ -119,7 +119,7 @@ header p {
 .content-section {
     display: flex;
     flex-direction: column;
-    gap: 2rem; /* Increased for better spacing between info-box and image */
+    gap: 2rem;
     padding: 1.5rem 0;
     align-items: center;
     background-color: #4a2c72;
@@ -148,7 +148,7 @@ header p {
     max-width: 90%;
     text-align: left;
     color: #e0d7f7;
-    cursor: pointer; /* Indicates clickable for accordion */
+    cursor: pointer;
 }
 
 .info-box .title-row {
@@ -169,7 +169,7 @@ header p {
     font-size: 1.5rem;
     color: #e0d7f7;
     margin-left: auto;
-    margin-right: 1rem; /* Space before links */
+    margin-right: 1rem;
 }
 
 .info-box p.image-links {
@@ -323,7 +323,7 @@ a {
     width: 20px;
     height: 20px;
     animation: spin 1s linear infinite;
-    margin: 6px 10px; /* Aligns with button spacing */
+    margin: 6px 10px;
 }
 
 @keyframes spin {
@@ -336,8 +336,11 @@ a {
     flex-wrap: wrap;
     gap: 8px;
     align-items: center;
+    justify-content: center;
     margin: 0.5rem 0 1rem;
-    font-size: 0.75rem;
+    padding: 0.5rem 0.75rem;
+    border-radius: 6px;
+    background-color: #F7F0FF;
 }
 
 .imgflip-icon {
@@ -345,7 +348,21 @@ a {
     display: flex;
     flex-direction: column;
     align-items: center;
+    justify-content: center;
     gap: 2px;
+}
+
+
+.imgflip-icon.owned::after {
+    content: "";
+    position: absolute;
+    top: 6px;
+    left: 6px;
+    right: 6px;
+    bottom: 6px;
+    border-top: 2px solid rgba(0, 0, 0, 0.75);
+    transform: rotate(-30deg);
+    pointer-events: none;
 }
 
 .imgflip-icon img {
@@ -358,7 +375,6 @@ a {
     font-size: 0.7rem;
 }
 
-/* Current icon (the one you're using right now) */
 .imgflip-icon.current img {
     width: 28px;
     height: 28px;
@@ -366,7 +382,6 @@ a {
     border-radius: 4px;
 }
 
-/* Icons you already have: show a diagonal slash through them */
 .imgflip-icon.owned::after {
     content: "";
     position: absolute;
@@ -379,12 +394,10 @@ a {
     pointer-events: none;
 }
 
-/* Icons you don't have yet – fade them slightly */
 .imgflip-icon.locked img {
     opacity: 0.35;
 }
 
-/* Current icon next to "@mbtininja" text */
 #current-imgflip-icon img {
     width: 20px;
     height: 20px;
@@ -490,6 +503,16 @@ footer a:hover {
     .section-buttons button {
         padding: 5px 8px;
         font-size: 0.8rem;
+    }
+
+    .section-buttons button.chip-type {
+        background-color: #e0d7f7;
+        border-color: #c1b3f0;
+    }
+
+    .section-buttons button.chip-meme {
+        background-color: #f1e8ff;
+        border-color: #d9c7ff;
     }
 
     .image-container {
