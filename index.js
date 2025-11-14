@@ -32,7 +32,7 @@ function setupImgflipIcons() {
   if (rowContainer) {
     const prefix = document.createElement("span");
     prefix.classList.add("imgflip-icon-prefix");
-    prefix.textContent = "Views:";
+    prefix.textContent = "Views icon:";
     rowContainer.appendChild(prefix);
   }
 
@@ -192,9 +192,25 @@ function renderSections(items) {
       : Array.isArray(item.tags)
       ? item.tags
       : [];
-    const keywordsArr = rawKeywords
+
+    // Normalised keyword list (lowercase)
+    let keywordsArr = rawKeywords
       .map(k => String(k).toLowerCase().trim())
       .filter(Boolean);
+
+    // Remove anything that is actually an MBTI type
+    keywordsArr = keywordsArr.filter(
+      kw => !MBTI_SET.has(kw.toUpperCase())
+    );
+
+    // Ensure "memes" is always present as a keyword if any tag is "memes"/"Memes"
+    const hasMemesTag = rawKeywords.some(
+      k => String(k).toLowerCase().trim() === "memes"
+    );
+    if (hasMemesTag && !keywordsArr.includes("memes")) {
+      keywordsArr.push("memes");
+    }
+
     const keywordsStr = keywordsArr.join(",");
 
     section.dataset.type = typeList;
@@ -221,7 +237,7 @@ function renderSections(items) {
               </a>
               ${
                 memeLower
-                  ? `<a href="https://knowyourmeme.com/search?q=${encodeURIComponent(memeType)}" target="_blank" rel="noopener" title="Search on Know Your Meme">
+                  ? `<a href="${FEED_BASE}/kym?name=${encodeURIComponent(memeType)}" target="_blank" rel="noopener" title="Open on Know Your Meme">
                        <img src="images/Know_Your_Meme.svg" alt="Know Your Meme">
                      </a>`
                   : ""
@@ -259,7 +275,7 @@ function renderSections(items) {
         });
       }
 
-      // Keyword chips (including ones that are also MBTI strings)
+      // Keyword chips (no MBTI types here – they were removed above)
       keywordsArr.forEach(kw => {
         chipData.push({
           type: "keywords",

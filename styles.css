@@ -350,8 +350,8 @@ a {
     align-items: center;
     justify-content: center;
     gap: 2px;
+    padding: 4px;
 }
-
 
 .imgflip-icon.owned::after {
     content: "";
@@ -371,7 +371,13 @@ a {
 }
 
 .imgflip-icon-label {
-    font-size: 0.7rem;
+    font-size: 0.70rem;
+    line-height: 1;
+    margin-top: 4px;
+}
+
+.imgflip-icon.current .imgflip-icon-label {
+    margin-top: 0px;
 }
 
 .imgflip-icon.current img {
