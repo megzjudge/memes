@@ -69,19 +69,45 @@ header p {
 }
 
 .filter-row {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    gap: 0.5rem;
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  margin-bottom: 0.75rem;
 }
 
 .filter-row h4 {
     padding: 0.5rem 0;
     background-color: transparent;
     margin-bottom: 0;
-    font-size: 0.85rem;
+    margin: 0;
+    font-size: 0.9rem;
     color: #e0d7f7;
     white-space: nowrap;
+    font-weight: 600;
+}
+
+.filter-row.sort-row {
+    margin-top: 0.25rem;
+}
+
+#sort-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+#sort-buttons button {
+  padding: 0.35rem 0.75rem;
+  font-size: 0.9rem;      /* same font size as other chips */
+  border-radius: 999px;
+  border: 1px solid #ccc;
+  background: #fff;
+  cursor: pointer;
+}
+
+#sort-buttons button.active {
+  border-color: #8b5cf6;
+  background: #f3e8ff;
 }
 
 #type-buttons, #meme-buttons, #keywords-buttons {
