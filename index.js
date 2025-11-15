@@ -1,522 +1,632 @@
-// index.js
+// ------------ Imgflip icons (top of page) ------------
 
-'use strict';
+const IMGFLIP_PROFILE_URL = "https://imgflip.com/user/mbtininja";
 
-const WORKER_ORIGIN = 'https://rapid-math-6088.touch-97a.workers.dev';
+const IMGFLIP_ICONS = [
+  { id: 1,  file: "images/icon_1.svg",  label: "0" },
+  { id: 2,  file: "images/icon_2.svg",  label: "250" },
+  { id: 3,  file: "images/icon_3.svg",  label: "500" },
+  { id: 4,  file: "images/icon_4.svg",  label: "1k" },
+  { id: 5,  file: "images/icon_5.svg",  label: "2k" },
+  { id: 6,  file: "images/icon_6.svg",  label: "3k" },
+  { id: 7,  file: "images/icon_7.svg",  label: "5k" },
+  { id: 8,  file: "images/icon_8.svg",  label: "7k" },
+  { id: 9,  file: "images/icon_9.svg",  label: "8k" },
+  { id: 10, file: "images/icon_10.svg", label: "10k" },
+  { id: 11, file: "images/icon_11.svg", label: "15k" },
+  { id: 12, file: "images/icon_12.svg", label: "20k" }, // current
+  { id: 13, file: "images/icon_13.svg", label: "30k" }  // goal
+];
 
-const MBTI_TYPES = new Set([
-  'ESTP', 'ISTP', 'ESFP', 'ISFP',
-  'ESTJ', 'ISTJ', 'ESFJ', 'ISFJ',
-  'ENFP', 'INFP', 'ENFJ', 'INFJ',
-  'ENTJ', 'INTJ', 'ENTP', 'INTP'
-]);
+// how many icons you currently own
+const IMGFLIP_MAX_OWNED_ICON_ID = 12;
+// which one is currently selected on Imgflip
+const IMGFLIP_CURRENT_ICON_ID = 12;
 
-let allItems = [];
-let allSections = [];
-let currentFilters = {
-  type: 'all',
-  meme: 'all',
-  keywords: 'all'
+function setupImgflipIcons() {
+  const currentContainer = document.getElementById("current-imgflip-icon");
+  const rowContainer = document.getElementById("imgflip-icon-row");
+  if (!currentContainer && !rowContainer) return;
+
+  // Prefix text: "Views icon:"
+  if (rowContainer) {
+    const prefix = document.createElement("span");
+    prefix.classList.add("imgflip-icon-prefix");
+    prefix.textContent = "Views icon:";
+    rowContainer.appendChild(prefix);
+  }
+
+  IMGFLIP_ICONS.forEach(icon => {
+    const owned = icon.id <= IMGFLIP_MAX_OWNED_ICON_ID;
+    const isCurrent = icon.id === IMGFLIP_CURRENT_ICON_ID;
+
+    // Icons row under the header text
+    if (rowContainer) {
+      const wrapper = document.createElement("div");
+      wrapper.classList.add("imgflip-icon");
+
+      // owned but NOT current → strike
+      if (owned && !isCurrent) {
+        wrapper.classList.add("owned");
+      } else if (!owned) {
+        wrapper.classList.add("locked");
+      }
+      if (isCurrent) {
+        wrapper.classList.add("current");
+      }
+
+      const link = document.createElement("a");
+      link.href = IMGFLIP_PROFILE_URL;
+      link.target = "_blank";
+      link.rel = "noopener";
+
+      const img = document.createElement("img");
+      img.src = icon.file;
+      img.alt = `Views threshold: ${icon.label}`;
+      link.appendChild(img);
+
+      wrapper.appendChild(link);
+
+      // numeric label only (no "icon" word)
+      const label = document.createElement("span");
+      label.classList.add("imgflip-icon-label");
+      label.textContent = icon.label;
+      wrapper.appendChild(label);
+
+      rowContainer.appendChild(wrapper);
+    }
+
+    // The single current icon next to "@mbtininja"
+    if (isCurrent && currentContainer) {
+      const link = document.createElement("a");
+      link.href = IMGFLIP_PROFILE_URL;
+      link.target = "_blank";
+      link.rel = "noopener";
+
+      const img = document.createElement("img");
+      img.src = icon.file;
+      img.alt = `Current views icon: ${icon.label}`;
+      link.appendChild(img);
+
+      currentContainer.appendChild(link);
+    }
+  });
+}
+
+// ------------ Meme feed + filters + sort ------------
+
+const FEED_BASE = "https://rapid-math-6088.touch-97a.workers.dev";
+
+let sections = [];
+const currentFilters = {
+  type: "all",
+  meme: "all",
+  keywords: "all"
 };
-let sortMode = 'newest'; // 'newest' | 'oldest' | 'views'
 
-document.addEventListener('DOMContentLoaded', () => {
-  console.log('Script loaded at', new Date().toLocaleString('en-AU', { timeZone: 'Australia/Sydney' }));
+let sortState = {
+  mode: "age",           // "age" | "views"
+  ageDirection: "newest" // "newest" | "oldest"
+};
+
+const MBTI_TYPES = [
+  "ESTP", "ISTP", "ESFP", "ISFP",
+  "ESTJ", "ISTJ", "ESFJ", "ISFJ",
+  "ENFP", "INFP", "ENFJ", "INFJ",
+  "ENTJ", "INTJ", "ENTP", "INTP"
+];
+const MBTI_SET = new Set(MBTI_TYPES);
+
+document.addEventListener("DOMContentLoaded", () => {
+  console.log(
+    "Script loaded at",
+    new Date().toLocaleString("en-AU", { timeZone: "Australia/Sydney" })
+  );
 
   setupImgflipIcons();
 
   bootstrap().catch(err => {
-    console.error('Bootstrap failed:', err);
-    showEmpty('No memes found.');
+    console.error("Bootstrap failed:", err);
+    showEmpty("No memes found.");
   });
 });
 
-// ---------------- bootstrap / fetch ----------------
-
 async function bootstrap() {
-  const main = document.querySelector('main');
-  if (!main) return;
+  const items = await fetchFeed();
+  if (!items.length) {
+    showEmpty("No memes found.");
+    return;
+  }
+  renderSections(items);
+  initSortControls();
+  initFilters();
+}
 
-  showLoader(main);
+// ---------- fetch feed ----------
 
-  const params = new URLSearchParams(window.location.search);
-  const isAdmin = params.get('admin') === '1';
-
-  const feedUrl = isAdmin
-    ? `${WORKER_ORIGIN}/feed?fresh=1`
-    : `${WORKER_ORIGIN}/feed`;
-
-  console.log('Fetching feed from', feedUrl);
-
-  const res = await fetch(feedUrl);
+async function fetchFeed() {
+  const url = `${FEED_BASE}/feed?fresh=1`;
+  console.log("Fetching feed from", url);
+  const t0 = performance.now();
+  const res = await fetch(url, { headers: { accept: "application/json" } });
   if (!res.ok) {
     throw new Error(`Feed HTTP ${res.status}`);
   }
-  const data = await res.json();
-
-  if (!data || !Array.isArray(data.items) || data.items.length === 0) {
-    showEmpty('No memes found.');
-    return;
-  }
-
-  allItems = data.items.slice();
-  buildUiFromItems(allItems);
+  const json = await res.json();
+  const items = Array.isArray(json.items) ? json.items : [];
+  const t1 = performance.now();
+  console.log(`Got ${items.length} items in ${Math.round(t1 - t0)}ms`);
+  return items;
 }
 
-function showLoader(main) {
-  main.innerHTML = '';
-  const loader = document.createElement('div');
-  loader.className = 'loader';
-  main.appendChild(loader);
-}
+// ---------- rendering ----------
 
 function showEmpty(msg) {
-  const main = document.querySelector('main');
+  const main = document.querySelector("main");
   if (!main) return;
-  main.innerHTML = '';
-  const p = document.createElement('p');
-  p.textContent = msg;
-  p.style.padding = '1rem';
-  main.appendChild(p);
+  main.innerHTML = `<div class="empty"><p>${msg}</p></div>`;
 }
 
-// ---------------- build UI from items ----------------
+function renderSections(items) {
+  const main = document.querySelector("main");
+  if (!main) throw new Error("<main> not found");
 
-function buildUiFromItems(items) {
-  const main = document.querySelector('main');
-  const typeContainer = document.getElementById('type-buttons');
-  const memeContainer = document.getElementById('meme-buttons');
-  const keywordContainer = document.getElementById('keywords-buttons');
+  main.innerHTML = "";
+  const frag = document.createDocumentFragment();
 
-  if (!main || !typeContainer || !memeContainer || !keywordContainer) {
-    console.warn('Missing container(s) for filters or main');
-    return;
-  }
+  items.forEach((item, idx) => {
+    const section = document.createElement("section");
+    section.className = "content-section";
 
-  main.innerHTML = '';
+    const mbtiTypes = Array.isArray(item.mbti_types)
+      ? item.mbti_types.map(t => String(t).toUpperCase())
+      : [];
+    const typeList = mbtiTypes.length ? mbtiTypes.join(", ") : "NON-MBTI";
 
-  const typeSet = new Set();
-  const memeSet = new Set();
-  const keywordSet = new Set();
+    const rawMemeType = item.meme_type || item.meme_tag || "";
+    const memeType = String(rawMemeType);
+    const memeLower = memeType.toLowerCase();
 
-  allSections = items.map((item, idx) => {
-    const section = buildSection(item, idx);
-    main.appendChild(section);
+    const rawKeywords = Array.isArray(item.keywords)
+      ? item.keywords
+      : Array.isArray(item.tags)
+      ? item.tags
+      : [];
 
-    if (item.mbti_types && item.mbti_types.length) {
-      item.mbti_types.forEach(t => typeSet.add(t.toUpperCase()));
-    } else {
-      typeSet.add('NON-MBTI');
+    // Normalised keyword list (lowercase)
+    let keywordsArr = rawKeywords
+      .map(k => String(k).toLowerCase().trim())
+      .filter(Boolean);
+
+    // Remove anything that is actually an MBTI type
+    keywordsArr = keywordsArr.filter(
+      kw => !MBTI_SET.has(kw.toUpperCase())
+    );
+
+    // Ensure "memes" is always present as a keyword if any tag is "memes"/"Memes"
+    const hasMemesTag = rawKeywords.some(
+      k => String(k).toLowerCase().trim() === "memes"
+    );
+    if (hasMemesTag && !keywordsArr.includes("memes")) {
+      keywordsArr.push("memes");
     }
 
-    if (item.meme_type) {
-      memeSet.add(item.meme_type.toLowerCase());
-    }
+    const keywordsStr = keywordsArr.join(",");
 
-    if (item.keywords && item.keywords.length) {
-      item.keywords.forEach(kw => {
-        const lower = kw.toLowerCase();
-        if (!MBTI_TYPES.has(lower.toUpperCase())) {
-          keywordSet.add(lower);
+    section.dataset.type = typeList;
+    section.dataset.meme = memeLower;
+    section.dataset.keywords = keywordsStr;
+    section.dataset.index = String(idx); // 0 = newest
+    const views = typeof item.views === "number" ? item.views : 0;
+    section.dataset.views = String(views);
+
+    const title = escapeHtml(item.title || item.id || "Untitled");
+    const pageUrl = item.page_url || `https://imgflip.com/i/${item.id}`;
+    const imageUrl =
+      item.image_url || (item.id ? `https://i.imgflip.com/${item.id}.jpg` : "");
+
+    section.innerHTML = `
+      <div class="info-box">
+        <div class="title-row">
+          <h3>${title}</h3>
+          <div class="meta-row" style="display:flex;align-items:center;justify-content:space-between;gap:8px;">
+            <span class="view-count">${views ? numberWithCommas(views) + " views" : ""}</span>
+            <p class="image-links" style="display:flex;align-items:center;gap:8px;margin:0;">
+              <a href="${pageUrl}" target="_blank" rel="noopener" title="Open on Imgflip">
+                <img src="images/imgflip.svg" alt="Imgflip link">
+              </a>
+              ${
+                memeLower
+                  ? `<a href="${FEED_BASE}/kym?name=${encodeURIComponent(memeType)}" target="_blank" rel="noopener" title="Open on Know Your Meme">
+                       <img src="images/Know_Your_Meme.svg" alt="Know Your Meme">
+                     </a>`
+                  : ""
+              }
+            </p>
+          </div>
+        </div>
+        <div class="section-buttons"></div>
+      </div>
+      <div class="image-container">
+        <img src="${imageUrl}" alt="${title} Meme" loading="lazy">
+      </div>
+    `;
+
+    const buttonsContainer = section.querySelector(".section-buttons");
+    if (buttonsContainer) {
+      const chipData = [];
+
+      // MBTI type chips
+      typeList
+        .split(/[\s,]+/)
+        .map(t => t.trim())
+        .filter(Boolean)
+        .forEach(t => {
+          const T = t.toUpperCase();
+          chipData.push({ type: "type", value: T, label: displayType(T) });
+        });
+
+      // Meme type chip
+      if (memeLower) {
+        chipData.push({
+          type: "meme",
+          value: memeLower,
+          label: memeType
+        });
+      }
+
+      // Keyword chips (no MBTI types here – they were removed above)
+      keywordsArr.forEach(kw => {
+        chipData.push({
+          type: "keywords",
+          value: kw,
+          label: kw
+        });
+      });
+
+      const seen = new Set();
+      chipData.forEach(d => {
+        const key = `${d.type}:${d.value}`;
+        if (seen.has(key)) return;
+        seen.add(key);
+
+        const btn = document.createElement("button");
+        btn.textContent = d.label;
+        btn.dataset.filterType = d.type;
+        btn.dataset.value = d.value;
+
+        if (d.type === "type") {
+          btn.classList.add("chip-type");
+        } else if (d.type === "meme") {
+          btn.classList.add("chip-meme");
         }
+
+        btn.addEventListener("click", () =>
+          filterSections(d.type, d.value)
+        );
+        buttonsContainer.appendChild(btn);
       });
     }
 
-    return section;
+    frag.appendChild(section);
   });
 
-  MBTI_TYPES.forEach(t => typeSet.add(t));
-  typeSet.add('NON-MBTI');
-  typeSet.add('All');
-
-  createFilterButtons(typeContainer, Array.from(typeSet).sort(), 'type');
-  createFilterButtons(memeContainer, Array.from(memeSet).sort(), 'meme');
-  createFilterButtons(keywordContainer, Array.from(keywordSet).sort(), 'keywords');
-
-  setupSortRow();
-
-  currentFilters = { type: 'all', meme: 'all', keywords: 'all' };
-  sortMode = 'newest';
-  updateSortButtonsActive();
-  applyFiltersAndSort();
+  main.appendChild(frag);
+  sections = Array.from(document.querySelectorAll(".content-section"));
 }
 
-// ---------------- section construction ----------------
+// ---------- sort controls (top) ----------
 
-function buildSection(item, index) {
-  const section = document.createElement('section');
-  section.className = 'content-section';
+function initSortControls() {
+  const filterContainer = document.querySelector(".filter-container");
+  if (!filterContainer) return;
 
-  const types = (item.mbti_types && item.mbti_types.length)
-    ? item.mbti_types.join(', ')
-    : 'NON-MBTI';
+  let sortRow = document.querySelector(".sort-row");
+  if (!sortRow) {
+    sortRow = document.createElement("div");
+    sortRow.className = "filter-row sort-row";
+    sortRow.innerHTML = `
+      <h4>Sort:</h4>
+      <div id="sort-buttons"></div>
+    `;
 
-  const memeTypeRaw = item.meme_type || '';
-  const memeTypeAttr = memeTypeRaw.toLowerCase();
-  const keywordsArr = item.keywords || [];
-  const keywordsStr = keywordsArr.join(', ');
-
-  section.dataset.type = types;
-  section.dataset.meme = memeTypeAttr;
-  section.dataset.keywords = keywordsStr.toLowerCase();
-  section.dataset.index = String(index);
-  section.dataset.views = String(item.views || 0);
-
-  const infoBox = document.createElement('div');
-  infoBox.className = 'info-box';
-
-  const titleRow = document.createElement('div');
-  titleRow.className = 'title-row';
-
-  const h3 = document.createElement('h3');
-  h3.textContent = item.title || item.id;
-  titleRow.appendChild(h3);
-
-  const metaRow = document.createElement('div');
-  metaRow.className = 'meta-row';
-  metaRow.style.display = 'flex';
-  metaRow.style.alignItems = 'center';
-  metaRow.style.justifyContent = 'space-between';
-  metaRow.style.gap = '8px';
-
-  const viewSpan = document.createElement('span');
-  viewSpan.className = 'view-count';
-  const views = item.views || 0;
-  viewSpan.textContent = `${views.toLocaleString()} views` +
-    (item.age_text ? ` • ${item.age_text}` : '');
-  metaRow.appendChild(viewSpan);
-
-  const linksP = document.createElement('p');
-  linksP.className = 'image-links';
-  linksP.style.display = 'flex';
-  linksP.style.alignItems = 'center';
-  linksP.style.gap = '8px';
-  linksP.style.margin = '0';
-
-  const imgflipLink = document.createElement('a');
-  imgflipLink.href = item.page_url || `https://imgflip.com/i/${item.id}`;
-  imgflipLink.target = '_blank';
-  imgflipLink.rel = 'noopener';
-  imgflipLink.title = 'Open on Imgflip';
-
-  const imgflipImg = document.createElement('img');
-  imgflipImg.src = 'images/imgflip.svg';
-  imgflipImg.alt = 'Imgflip link';
-  imgflipLink.appendChild(imgflipImg);
-  linksP.appendChild(imgflipLink);
-
-  if (item.meme_type) {
-    const kymLink = document.createElement('a');
-    const kymUrl = `${WORKER_ORIGIN}/kym?name=${encodeURIComponent(item.meme_type)}`;
-    kymLink.href = kymUrl;
-    kymLink.target = '_blank';
-    kymLink.rel = 'noopener';
-    kymLink.title = 'Open on Know Your Meme';
-
-    const kymImg = document.createElement('img');
-    kymImg.src = 'images/Know_Your_Meme.svg';
-    kymImg.alt = 'Know Your Meme';
-    kymLink.appendChild(kymImg);
-
-    linksP.appendChild(kymLink);
-  }
-
-  metaRow.appendChild(linksP);
-  titleRow.appendChild(metaRow);
-  infoBox.appendChild(titleRow);
-
-  const buttonsDiv = document.createElement('div');
-  buttonsDiv.className = 'section-buttons';
-
-  types.split(/,\s*/).forEach(t => {
-    if (!t) return;
-    const btn = document.createElement('button');
-    btn.textContent = t === 'NON-MBTI' ? 'Non-MBTI' : t;
-    btn.dataset.filterType = 'type';
-    btn.dataset.value = t === 'NON-MBTI' ? 'NON-MBTI' : t.toUpperCase();
-    buttonsDiv.appendChild(btn);
-  });
-
-  if (memeTypeRaw) {
-    const btn = document.createElement('button');
-    btn.textContent = memeTypeRaw;
-    btn.dataset.filterType = 'meme';
-    btn.dataset.value = memeTypeAttr;
-    buttonsDiv.appendChild(btn);
-  }
-
-  keywordsArr.forEach(kw => {
-    const lower = kw.toLowerCase();
-    const btn = document.createElement('button');
-    btn.textContent = kw;
-    btn.dataset.filterType = 'keywords';
-    btn.dataset.value = lower;
-    buttonsDiv.appendChild(btn);
-  });
-
-  infoBox.appendChild(buttonsDiv);
-  section.appendChild(infoBox);
-
-  const imgContainer = document.createElement('div');
-  imgContainer.className = 'image-container';
-  const img = document.createElement('img');
-  img.src = item.image_url;
-  img.alt = `${item.title || item.id} Meme`;
-  img.loading = 'lazy';
-  imgContainer.appendChild(img);
-  section.appendChild(imgContainer);
-
-  buttonsDiv.addEventListener('click', evt => {
-    const target = evt.target;
-    if (!(target instanceof HTMLElement)) return;
-    const filterType = target.dataset.filterType;
-    const value = target.dataset.value;
-    if (!filterType || !value) return;
-    applyFilter(filterType, value);
-  });
-
-  return section;
-}
-
-// ---------------- filter buttons ----------------
-
-function createFilterButtons(container, values, filterType) {
-  if (!container) return;
-  container.innerHTML = '';
-
-  const allBtn = document.createElement('button');
-  allBtn.textContent = 'All';
-  allBtn.dataset.filterType = filterType;
-  allBtn.dataset.value = 'all';
-  allBtn.addEventListener('click', () => applyFilter(filterType, 'all'));
-  container.appendChild(allBtn);
-
-  values.forEach(value => {
-    if (!value) return;
-    if (filterType === 'type' && (value === 'All' || value === 'ALL')) return;
-
-    const btn = document.createElement('button');
-    let label = value;
-
-    if (filterType === 'type') {
-      if (value === 'NON-MBTI') {
-        label = 'Non-MBTI';
-      } else {
-        label = value.toUpperCase();
-      }
-      btn.dataset.value = value.toUpperCase();
+    const firstRow = filterContainer.querySelector(".filter-row");
+    if (firstRow) {
+      filterContainer.insertBefore(sortRow, firstRow);
     } else {
-      label = value;
-      btn.dataset.value = value;
+      filterContainer.appendChild(sortRow);
+    }
+  }
+
+  const sortButtonsContainer = document.getElementById("sort-buttons");
+  if (!sortButtonsContainer) return;
+  sortButtonsContainer.innerHTML = "";
+
+  const ageBtn = document.createElement("button");
+  ageBtn.id = "sort-age-btn";
+  ageBtn.type = "button";
+  ageBtn.textContent = "Newest first";
+  ageBtn.addEventListener("click", () => {
+    if (sortState.mode === "age") {
+      sortState.ageDirection =
+        sortState.ageDirection === "newest" ? "oldest" : "newest";
+    } else {
+      sortState.mode = "age";
+      sortState.ageDirection = "newest";
+    }
+    updateSortButtonsUI();
+    applySort();
+  });
+
+  const viewsBtn = document.createElement("button");
+  viewsBtn.id = "sort-views-btn";
+  viewsBtn.type = "button";
+  viewsBtn.textContent = "Sort by views";
+  viewsBtn.addEventListener("click", () => {
+    if (sortState.mode === "views") {
+      sortState.mode = "age";
+      sortState.ageDirection = "newest";
+    } else {
+      sortState.mode = "views";
+    }
+    updateSortButtonsUI();
+    applySort();
+  });
+
+  sortButtonsContainer.appendChild(ageBtn);
+  sortButtonsContainer.appendChild(viewsBtn);
+
+  updateSortButtonsUI();
+}
+
+function applySort() {
+  const main = document.querySelector("main");
+  if (!main) return;
+  const nodes = Array.from(main.querySelectorAll(".content-section"));
+  if (!nodes.length) return;
+
+  const sorted = [...nodes].sort((a, b) => {
+    const idxA = Number(a.dataset.index || 0);
+    const idxB = Number(b.dataset.index || 0);
+
+    if (sortState.mode === "views") {
+      const vA = Number(a.dataset.views || 0);
+      const vB = Number(b.dataset.views || 0);
+      if (vB !== vA) return vB - vA; // high views first
+      return idxA - idxB;
+    } else {
+      if (sortState.ageDirection === "newest") {
+        return idxA - idxB; // 0 = newest
+      } else {
+        return idxB - idxA;
+      }
+    }
+  });
+
+  sorted.forEach(node => main.appendChild(node));
+}
+
+function updateSortButtonsUI() {
+  const ageBtn = document.getElementById("sort-age-btn");
+  const viewsBtn = document.getElementById("sort-views-btn");
+
+  if (ageBtn) {
+    ageBtn.textContent =
+      sortState.ageDirection === "newest" ? "Newest first" : "Oldest first";
+    const active = sortState.mode === "age";
+    ageBtn.classList.toggle("active", active);
+    ageBtn.setAttribute("aria-pressed", active ? "true" : "false");
+  }
+
+  if (viewsBtn) {
+    const active = sortState.mode === "views";
+    viewsBtn.classList.toggle("active", active);
+    viewsBtn.setAttribute("aria-pressed", active ? "true" : "false");
+  }
+}
+
+// ---------- filters ----------
+
+function initFilters() {
+  sections = Array.from(document.querySelectorAll(".content-section"));
+
+  const typeButtonsContainer = document.getElementById("type-buttons");
+  const memeButtonsContainer = document.getElementById("meme-buttons");
+  const keywordButtonsContainer = document.getElementById("keywords-buttons");
+
+  const typeOptions = new Set();
+  const memeOptions = new Set();
+  const keywordOptions = new Set();
+
+  sections.forEach(section => {
+    const typeStr = (section.dataset.type || "").trim();
+    if (typeStr) {
+      typeStr
+        .split(/[\s,]+/)
+        .map(t => t.trim())
+        .filter(Boolean)
+        .forEach(t => typeOptions.add(t.toUpperCase()));
     }
 
-    btn.textContent = label;
+    const memeStr = (section.dataset.meme || "").toLowerCase().trim();
+    if (memeStr) memeOptions.add(memeStr);
+
+    const kwStr = (section.dataset.keywords || "").toLowerCase().trim();
+    if (kwStr) {
+      kwStr
+        .split(",")
+        .map(k => k.trim())
+        .filter(Boolean)
+        .forEach(k => {
+          const upper = k.toUpperCase();
+          // do NOT include MBTI types as global keyword filters
+          if (MBTI_SET.has(upper)) return;
+          keywordOptions.add(k);
+        });
+    }
+  });
+
+  MBTI_TYPES.forEach(t => typeOptions.add(t));
+
+  if (
+    sections.some(s =>
+      (s.dataset.type || "").toUpperCase().includes("NON-MBTI")
+    )
+  ) {
+    typeOptions.add("NON-MBTI");
+  }
+
+  buildFilterButtons(
+    typeButtonsContainer,
+    Array.from(typeOptions).sort(),
+    "type"
+  );
+  buildFilterButtons(
+    memeButtonsContainer,
+    Array.from(memeOptions).sort(),
+    "meme"
+  );
+  buildFilterButtons(
+    keywordButtonsContainer,
+    Array.from(keywordOptions).sort(),
+    "keywords"
+  );
+}
+
+function buildFilterButtons(container, values, filterType) {
+  if (!container) return;
+
+  container.innerHTML = "";
+
+  const allBtn = document.createElement("button");
+  allBtn.textContent = "All";
+  allBtn.dataset.filterType = filterType;
+  allBtn.dataset.value = "all";
+  allBtn.addEventListener("click", () =>
+    filterSections(filterType, "all")
+  );
+  container.appendChild(allBtn);
+
+  values.forEach(val => {
+    if (!val || typeof val !== "string") return;
+    const btn = document.createElement("button");
     btn.dataset.filterType = filterType;
-    btn.addEventListener('click', () => applyFilter(filterType, btn.dataset.value));
+
+    if (filterType === "type") {
+      const upper = val.toUpperCase();
+      btn.dataset.value = upper;
+      btn.textContent = displayType(upper);
+    } else if (filterType === "meme") {
+      btn.dataset.value = val;
+      btn.textContent = toTitleCase(val);
+    } else {
+      btn.dataset.value = val;
+      btn.textContent = val;
+    }
+
+    btn.addEventListener("click", () =>
+      filterSections(filterType, btn.dataset.value)
+    );
     container.appendChild(btn);
   });
 }
 
-// ---------------- sort row ----------------
-
-function setupSortRow() {
-  const filterContainer = document.querySelector('.filter-container');
-  if (!filterContainer) return;
-
-  let row = document.querySelector('.filter-row.sort-row');
-  if (!row) {
-    row = document.createElement('div');
-    row.className = 'filter-row sort-row';
-
-    const h4 = document.createElement('h4');
-    h4.textContent = 'Sort:';
-    row.appendChild(h4);
-
-    const holder = document.createElement('div');
-    holder.id = 'sort-buttons';
-    row.appendChild(holder);
-
-    filterContainer.appendChild(row);
+function filterSections(filterType, value) {
+  if (!sections || !sections.length) {
+    sections = Array.from(document.querySelectorAll(".content-section"));
   }
 
-  const sortButtons = document.getElementById('sort-buttons');
-  if (!sortButtons) return;
-  sortButtons.innerHTML = '';
+  currentFilters[filterType] =
+    value === currentFilters[filterType] ? "all" : value;
 
-  const modes = [
-    { mode: 'newest', label: 'Newest first' },
-    { mode: 'oldest', label: 'Oldest first' },
-    { mode: 'views', label: 'Sort by views' }
-  ];
-
-  modes.forEach(m => {
-    const btn = document.createElement('button');
-    btn.textContent = m.label;
-    btn.dataset.mode = m.mode;
-    btn.addEventListener('click', () => {
-      if (sortMode === m.mode) return;
-      sortMode = m.mode;
-      updateSortButtonsActive();
-      applyFiltersAndSort();
-    });
-    sortButtons.appendChild(btn);
-  });
-}
-
-function updateSortButtonsActive() {
-  const sortButtons = document.querySelectorAll('#sort-buttons button');
-  sortButtons.forEach(btn => {
-    const mode = btn.dataset.mode;
-    const active = mode === sortMode;
-    btn.classList.toggle('active', active);
-    btn.setAttribute('aria-pressed', active ? 'true' : 'false');
-  });
-}
-
-// ---------------- filtering & sorting ----------------
-
-function applyFilter(filterType, value) {
-  const current = currentFilters[filterType];
-
-  if (value !== 'all' && current === value) {
-    currentFilters[filterType] = 'all';
-  } else {
-    Object.keys(currentFilters).forEach(k => {
-      currentFilters[k] = (k === filterType) ? value : 'all';
-    });
-  }
-
-  document.querySelectorAll(`.filter-container button[data-filter-type="${filterType}"]`)
+  document
+    .querySelectorAll(`button[data-filter-type="${filterType}"]`)
     .forEach(btn => {
-      const v = btn.dataset.value;
-      const active = v === currentFilters[filterType] && currentFilters[filterType] !== 'all';
-      btn.classList.toggle('active', active);
-      btn.setAttribute('aria-pressed', active ? 'true' : 'false');
+      const isActive =
+        btn.dataset.value === currentFilters[filterType] &&
+        currentFilters[filterType] !== "all";
+      btn.classList.toggle("active", isActive);
+      btn.setAttribute("aria-pressed", isActive ? "true" : "false");
     });
 
-  document.querySelectorAll(`.section-buttons button[data-filter-type="${filterType}"]`)
-    .forEach(btn => {
-      const v = btn.dataset.value;
-      const active = v === currentFilters[filterType] && currentFilters[filterType] !== 'all';
-      btn.classList.toggle('active', active);
-    });
+  sections.forEach(section => {
+    let matches = true;
 
-  applyFiltersAndSort();
-}
+    for (const [fType, fVal] of Object.entries(currentFilters)) {
+      if (fVal === "all") continue;
 
-function applyFiltersAndSort() {
-  if (!allSections || !allSections.length) return;
+      if (fType === "type") {
+        const secVal = (section.dataset.type || "").toUpperCase().trim();
+        const secTypes = secVal
+          .split(/[\s,]+/)
+          .map(t => t.trim())
+          .filter(Boolean);
 
-  const activeEntry = Object.entries(currentFilters).find(([, val]) => val !== 'all');
-
-  allSections.forEach(section => {
-    let show = true;
-
-    if (activeEntry) {
-      const [filterType, value] = activeEntry;
-
-      if (filterType === 'type') {
-        const sectionType = (section.dataset.type || '').toUpperCase();
-        if (value === 'NON-MBTI') {
-          show = !sectionType.split(/[\s,]+/).some(t => MBTI_TYPES.has(t));
+        if (fVal === "NON-MBTI") {
+          matches = !secTypes.some(t => MBTI_SET.has(t));
         } else {
-          show = sectionType.split(/[\s,]+/).includes(value);
+          matches = secTypes.includes(fVal);
         }
-      } else if (filterType === 'meme') {
-        const sectionMeme = (section.dataset.meme || '').toLowerCase().trim();
-        show = sectionMeme === value.toLowerCase();
-      } else if (filterType === 'keywords') {
-        const sectionKeywords = (section.dataset.keywords || '').toLowerCase();
-        const tokens = sectionKeywords.split(',').map(s => s.trim()).filter(Boolean);
-        const v = value.toLowerCase();
-        if (v.includes(' ')) {
-          show = tokens.some(t => t === v);
+      } else if (fType === "meme") {
+        const secVal = (section.dataset.meme || "").toLowerCase().trim();
+        matches = secVal === fVal;
+      } else if (fType === "keywords") {
+        const secVal = (section.dataset.keywords || "").toLowerCase().trim();
+        const kws = secVal
+          .split(",")
+          .map(k => k.trim())
+          .filter(Boolean);
+        if (fVal.includes(" ")) {
+          matches = kws.some(kw => kw === fVal);
         } else {
-          show = tokens.some(t => t.includes(v));
+          matches = kws.some(kw => kw.includes(fVal));
         }
       }
+
+      if (!matches) break;
     }
 
-    section.classList.toggle('hidden', !show);
+    section.classList.toggle("hidden", !matches);
   });
-
-  const main = document.querySelector('main');
-  if (!main) return;
-
-  const sorted = Array.from(allSections);
-  sorted.sort((a, b) => {
-    if (sortMode === 'views') {
-      const va = parseInt(a.dataset.views || '0', 10);
-      const vb = parseInt(b.dataset.views || '0', 10);
-      return vb - va;
-    }
-    const ia = parseInt(a.dataset.index || '0', 10);
-    const ib = parseInt(b.dataset.index || '0', 10);
-    return sortMode === 'oldest' ? ia - ib : ib - ia;
-  });
-
-  sorted.forEach(sec => main.appendChild(sec));
 }
 
-// ---------------- Imgflip icons row ----------------
+// ---------- helpers ----------
 
-function setupImgflipIcons() {
-  const header = document.querySelector('header');
-  if (!header) return;
-
-  let infoP = document.getElementById('current-imgflip-icon');
-  if (!infoP) {
-    infoP = document.createElement('p');
-    infoP.id = 'current-imgflip-icon';
-    infoP.className = 'art-process';
-    header.appendChild(infoP);
-  }
-
-  const currentIconIndex = 12; // update manually if you change it on Imgflip
-
-  infoP.innerHTML = `Views icon: <a href="https://imgflip.com/user/mbtininja" target="_blank" rel="noopener">@mbtininja on Imgflip</a>`;
-
-  let row = document.getElementById('imgflip-icon-row');
-  if (!row) {
-    row = document.createElement('div');
-    row.id = 'imgflip-icon-row';
-    row.className = 'imgflip-icon-row';
-    header.appendChild(row);
-  }
-  row.innerHTML = '';
-
-  const thresholds = [
-    0, 250, 500, 1000, 2000, 3000, 5000,
-    7000, 8000, 10000, 15000, 20000, 30000
-  ];
-
-  thresholds.forEach((value, idx) => {
-    const iconIndex = idx + 1;
-    const wrapper = document.createElement('div');
-    wrapper.className = 'imgflip-icon';
-
-    if (iconIndex <= currentIconIndex) {
-      wrapper.classList.add('owned');
-    } else {
-      wrapper.classList.add('locked');
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, c => {
+    switch (c) {
+      case "&":
+        return "&amp;";
+      case "<":
+        return "&lt;";
+      case ">":
+        return "&gt;";
+      case '"':
+        return "&quot;";
+      case "'":
+        return "&#39;";
+      default:
+        return c;
     }
-    if (iconIndex === currentIconIndex) {
-      wrapper.classList.add('current');
-    }
-
-    const img = document.createElement('img');
-    img.src = `images/icon_${iconIndex}.svg`;
-    img.alt = `Icon ${iconIndex}`;
-    img.addEventListener('click', () => {
-      window.open('https://imgflip.com/user/mbtininja', '_blank', 'noopener');
-    });
-
-    const label = document.createElement('span');
-    label.className = 'imgflip-icon-label';
-    label.textContent = value >= 1000 ? `${value / 1000}k` : `${value}`;
-
-    wrapper.appendChild(img);
-    wrapper.appendChild(label);
-    row.appendChild(wrapper);
   });
+}
+
+function numberWithCommas(x) {
+  const n = Number(x);
+  if (!Number.isFinite(n)) return String(x);
+  return n.toLocaleString("en-US");
+}
+
+function toTitleCase(s) {
+  return String(s)
+    .trim()
+    .toLowerCase()
+    .split(/\s+/)
+    .map(w => (w ? w[0].toUpperCase() + w.slice(1) : w))
+    .join(" ");
+}
+
+function displayType(upper) {
+  if (upper === "NON-MBTI") return "Non-MBTI";
+  return upper;
 }
