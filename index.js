@@ -220,13 +220,7 @@ function renderSections(items) {
     const views = typeof item.views === "number" ? item.views : 0;
     section.dataset.views = String(views);
 
-    // Build the title HTML conditionally: only if it's a real title (not the ID fallback)
-    let titleHtml = "";
-    if (item.title && item.title !== item.id) {
-      const title = escapeHtml(item.title);
-      titleHtml = `<h3>${title}</h3>`;
-    }
-
+    const title = escapeHtml(item.title || item.id || "Untitled");
     const pageUrl = item.page_url || `https://imgflip.com/i/${item.id}`;
     const imageUrl =
       item.image_url || (item.id ? `https://i.imgflip.com/${item.id}.jpg` : "");
@@ -234,7 +228,7 @@ function renderSections(items) {
     section.innerHTML = `
       <div class="info-box">
         <div class="title-row">
-          ${titleHtml}
+          <h3>${title}</h3>
           <div class="meta-row" style="display:flex;align-items:center;justify-content:space-between;gap:8px;">
             <span class="view-count">${views ? numberWithCommas(views) + " views" : ""}</span>
             <p class="image-links" style="display:flex;align-items:center;gap:8px;margin:0;">
@@ -254,7 +248,7 @@ function renderSections(items) {
         <div class="section-buttons"></div>
       </div>
       <div class="image-container">
-        <img src="${imageUrl}" alt="${item.title && item.title !== item.id ? item.title : 'Meme'}" loading="lazy">
+        <img src="${imageUrl}" alt="${title} Meme" loading="lazy">
       </div>
     `;
 
