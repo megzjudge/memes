@@ -229,7 +229,11 @@ function renderSections(items) {
         btn.textContent = d.label;
         btn.dataset.filterType = d.type;
         btn.dataset.value = d.value;
-        btn.classList.add(d.type === "type" ? "chip-type" : d.type === "meme" ? "chip-meme" : "");
+
+        // Ensure classList.add never receives an empty string
+        if (d.type === "type") btn.classList.add("chip-type");
+        else if (d.type === "meme") btn.classList.add("chip-meme");
+
         btn.addEventListener("click", () => filterSections(d.type, d.value));
         buttonsContainer.appendChild(btn);
       });
@@ -411,28 +415,38 @@ function filterSections(filterType, value) {
         const kws = (section.dataset.keywords || "").toLowerCase().split(",").map(k => k.trim()).filter(Boolean);
         matches = fVal.includes(" ") ? kws.some(kw => kw === fVal) : kws.some(kw => kw.includes(fVal));
       }
-
-      if (!matches) break;
     }
 
-    section.classList.toggle("hidden", !matches);
+    section.style.display = matches ? "block" : "none";
   });
 }
 
-// ---------- helpers ----------
+function displayType(type) {
+  switch (type) {
+    case "ESTP": return "The Entrepreneur";
+    case "ISTP": return "The Virtuoso";
+    case "ESFP": return "The Entertainer";
+    case "ISFP": return "The Adventurer";
+    case "ESTJ": return "The Executive";
+    case "ISTJ": return "The Logistician";
+    case "ESFJ": return "The Consul";
+    case "ISFJ": return "The Defender";
+    case "ENFP": return "The Campaigner";
+    case "INFP": return "The Mediator";
+    case "ENFJ": return "The Protagonist";
+    case "INFJ": return "The Advocate";
+    case "ENTJ": return "The Commander";
+    case "INTJ": return "The Architect";
+    case "ENTP": return "The Debater";
+    case "INTP": return "The Thinker";
+    default: return type;
+  }
+}
 
-function escapeHtml(s) {
-  return String(s).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
+function toTitleCase(str) {
+  return str.replace(/\b\w/g, function(l) { return l.toUpperCase(); });
 }
 
 function numberWithCommas(x) {
   return x.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ",");
-}
-
-function toTitleCase(str) {
-  return str.replace(/\w\S*/g, txt => txt.charAt(0).toUpperCase() + txt.substr(1).toLowerCase());
-}
-
-function displayType(type) {
-  return MBTI_SET.has(type.toUpperCase()) ? type.toUpperCase() : type;
 }
