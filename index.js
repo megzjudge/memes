@@ -93,11 +93,13 @@ function setupImgflipIcons() {
   });
 }
 
-// ------------ Meme feed + filters + sort ------------
+// ------------ Meme feed + filters + sort + Web Worker ----------
 
 const FEED_BASE = "https://rapid-math-6088.touch-97a.workers.dev";
 
 let sections = [];
+let worker = null; // Web Worker instance
+
 const currentFilters = {
   type: "all",
   meme: "all",
@@ -117,6 +119,24 @@ const MBTI_TYPES = [
 ];
 const MBTI_SET = new Set(MBTI_TYPES);
 
+// Initialize Web Worker
+if (typeof Worker !== "undefined") {
+  worker = new Worker("worker.js");
+  worker.onmessage = function(event) {
+    if (event.data.success) {
+      console.log("Worker response:", event.data.result);
+      // Handle the result, e.g., render it or update UI
+      if (event.data.result.items) {
+        renderSections(event.data.result.items);
+      }
+    } else {
+      console.error("Worker error:", event.data.error);
+    }
+  };
+} else {
+  console.warn("Web Worker is not supported in this environment.");
+}
+
 document.addEventListener("DOMContentLoaded", () => {
   console.log(
     "Script loaded at",
@@ -132,18 +152,26 @@ document.addEventListener("DOMContentLoaded", () => {
 });
 
 async function bootstrap() {
-  const items = await fetchFeed();
-  if (!items.length) {
-    showEmpty("No memes found.");
-    return;
+  // Use Web Worker to fetch the feed
+  if (worker) {
+    worker.postMessage({
+      type: "fetchFeed",
+      data: { fresh: true }
+    });
+  } else {
+    // Fallback to direct fetch
+    const items = await fetchFeed();
+    if (!items.length) {
+      showEmpty("No memes found.");
+      return;
+    }
+    renderSections(items);
+    initSortControls();
+    initFilters();
   }
-  renderSections(items);
-  initSortControls();
-  initFilters();
 }
 
-// ---------- fetch feed ----------
-
+// ---------- fetch feed (fallback if no worker) ----------
 async function fetchFeed() {
   const url = `${FEED_BASE}/feed?fresh=1`;
   console.log("Fetching feed from", url);
@@ -622,7 +650,7 @@ function toTitleCase(s) {
     .trim()
     .toLowerCase()
     .split(/\s+/)
-    .map(w => (w ? w[0].toUpperCase() + w.slice(1) : w))
+    .map(w => (w ? w.toUpperCase() + w.slice(1) : w))
     .join(" ");
 }
 
