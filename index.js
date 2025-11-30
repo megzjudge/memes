@@ -593,8 +593,22 @@ function filterSections(filterType, value) {
 // ---------- helpers ----------
 
 function unescapeHtml(s) {
-  const map = { '&amp;': '&', '&lt;': '<', '&gt;': '>', '&quot;': '"', '&#39;': "'" };
-  return String(s).replace(/&amp;|&lt;|&gt;|&quot;|&#39;/g, m => map[m]);
+  return String(s).replace(/&(amp|lt|gt|quot|#39);/g, c => {
+    switch (c) {
+      case "&amp;":
+        return "&";
+      case "&lt;":
+        return "<";
+      case "&gt;":
+        return ">";
+      case "&quot;":
+        return '"';
+      case "&#39;":
+        return "'";
+      default:
+        return c;
+    }
+  });
 }
 
 function numberWithCommas(x) {
