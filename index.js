@@ -1,5 +1,18 @@
-// ------------ Imgflip icons (top of page) ------------
+// escapeHtml function definition
+function escapeHtml(str) {
+  return String(str).replace(/[&<>"']/g, function(s) {
+    switch (s) {
+      case "&": return "&amp;";
+      case "<": return "&lt;";
+      case ">": return "&gt;";
+      case "\"": return "&quot;";
+      case "'": return "&#39;";
+      default: return s;
+    }
+  });
+}
 
+// ------------ Imgflip icons (top of page) ------------
 const IMGFLIP_PROFILE_URL = "https://imgflip.com/user/mbtininja";
 
 const IMGFLIP_ICONS = [
@@ -86,7 +99,6 @@ function setupImgflipIcons() {
 }
 
 // ------------ Meme feed + filters + sort ------------
-
 const FEED_BASE = "https://rapid-math-6088.touch-97a.workers.dev";
 
 let sections = [];
@@ -122,7 +134,6 @@ async function bootstrap() {
 }
 
 // ---------- fetch feed ----------
-
 async function fetchFeed() {
   const url = `${FEED_BASE}/feed?fresh=1`;
   console.log("Fetching feed from", url);
@@ -136,7 +147,6 @@ async function fetchFeed() {
 }
 
 // ---------- rendering ----------
-
 function showEmpty(msg) {
   const main = document.querySelector("main");
   if (!main) return;
@@ -192,261 +202,131 @@ function renderSections(items) {
                 <img src="images/imgflip.svg" alt="Imgflip link">
               </a>
               ${memeLower ? `<a href="${FEED_BASE}/kym?name=${encodeURIComponent(memeType)}" target="_blank" rel="noopener" title="Open on Know Your Meme">
-                <img src="images/Know_Your_Meme.svg" alt="Know Your Meme">
+                <img src="images/kym.svg" alt="KYM link">
               </a>` : ""}
             </p>
           </div>
         </div>
-        <div class="section-buttons"></div>
-      </div>
-      <div class="image-container">
-        <img src="${imageUrl}" alt="${title} Meme" loading="lazy">
+
+        <p class="keywords">Keywords: ${keywordsArr.length ? escapeHtml(keywordsArr.join(", ")) : "none"}</p>
+        <p class="type">${typeList}</p>
+        <a href="${pageUrl}" target="_blank" rel="noopener">
+          <img src="${imageUrl}" alt="${title}">
+        </a>
       </div>
     `;
-
-    const buttonsContainer = section.querySelector(".section-buttons");
-    if (buttonsContainer) {
-      const chipData = [];
-
-      // MBTI type chips
-      typeList.split(/[\s,]+/).map(t => t.trim()).filter(Boolean).forEach(t => {
-        chipData.push({ type: "type", value: t.toUpperCase(), label: displayType(t.toUpperCase()) });
-      });
-
-      // Meme type chip
-      if (memeLower) chipData.push({ type: "meme", value: memeLower, label: memeType });
-
-      // Keyword chips
-      keywordsArr.forEach(kw => chipData.push({ type: "keywords", value: kw, label: kw }));
-
-      const seen = new Set();
-      chipData.forEach(d => {
-        const key = `${d.type}:${d.value}`;
-        if (seen.has(key)) return;
-        seen.add(key);
-
-        const btn = document.createElement("button");
-        btn.textContent = d.label;
-        btn.dataset.filterType = d.type;
-        btn.dataset.value = d.value;
-
-        // Ensure classList.add never receives an empty string
-        if (d.type === "type") btn.classList.add("chip-type");
-        else if (d.type === "meme") btn.classList.add("chip-meme");
-
-        btn.addEventListener("click", () => filterSections(d.type, d.value));
-        buttonsContainer.appendChild(btn);
-      });
-    }
 
     frag.appendChild(section);
   });
 
   main.appendChild(frag);
-  sections = Array.from(document.querySelectorAll(".content-section"));
-}
-
-// ---------- sort controls (top) ----------
-
-function initSortControls() {
-  const filterContainer = document.querySelector(".filter-container");
-  if (!filterContainer) return;
-
-  let sortRow = document.querySelector(".sort-row");
-  if (!sortRow) {
-    sortRow = document.createElement("div");
-    sortRow.className = "filter-row sort-row";
-    sortRow.innerHTML = `<h4>Sort:</h4><div id="sort-buttons"></div>`;
-    const firstRow = filterContainer.querySelector(".filter-row");
-    if (firstRow) filterContainer.insertBefore(sortRow, firstRow);
-    else filterContainer.appendChild(sortRow);
-  }
-
-  const sortButtonsContainer = document.getElementById("sort-buttons");
-  if (!sortButtonsContainer) return;
-  sortButtonsContainer.innerHTML = "";
-
-  const ageBtn = document.createElement("button");
-  ageBtn.id = "sort-age-btn";
-  ageBtn.type = "button";
-  ageBtn.textContent = "Newest first";
-  ageBtn.addEventListener("click", () => {
-    if (sortState.mode === "age") sortState.ageDirection = sortState.ageDirection === "newest" ? "oldest" : "newest";
-    else { sortState.mode = "age"; sortState.ageDirection = "newest"; }
-    updateSortButtonsUI();
-    applySort();
-  });
-
-  const viewsBtn = document.createElement("button");
-  viewsBtn.id = "sort-views-btn";
-  viewsBtn.type = "button";
-  viewsBtn.textContent = "Sort by views";
-  viewsBtn.addEventListener("click", () => {
-    if (sortState.mode === "views") sortState.mode = "age", sortState.ageDirection = "newest";
-    else sortState.mode = "views";
-    updateSortButtonsUI();
-    applySort();
-  });
-
-  sortButtonsContainer.appendChild(ageBtn);
-  sortButtonsContainer.appendChild(viewsBtn);
-  updateSortButtonsUI();
-}
-
-function applySort() {
-  const main = document.querySelector("main");
-  if (!main) return;
-  const nodes = Array.from(main.querySelectorAll(".content-section"));
-  if (!nodes.length) return;
-
-  const sorted = [...nodes].sort((a, b) => {
-    const idxA = Number(a.dataset.index || 0);
-    const idxB = Number(b.dataset.index || 0);
-
-    if (sortState.mode === "views") {
-      const vA = Number(a.dataset.views || 0);
-      const vB = Number(b.dataset.views || 0);
-      return vB !== vA ? vB - vA : idxA - idxB;
-    } else {
-      return sortState.ageDirection === "newest" ? idxA - idxB : idxB - idxA;
-    }
-  });
-
-  sorted.forEach(node => main.appendChild(node));
-}
-
-function updateSortButtonsUI() {
-  const ageBtn = document.getElementById("sort-age-btn");
-  const viewsBtn = document.getElementById("sort-views-btn");
-
-  if (ageBtn) {
-    ageBtn.textContent = sortState.ageDirection === "newest" ? "Newest first" : "Oldest first";
-    const active = sortState.mode === "age";
-    ageBtn.classList.toggle("active", active);
-    ageBtn.setAttribute("aria-pressed", active ? "true" : "false");
-  }
-
-  if (viewsBtn) {
-    const active = sortState.mode === "views";
-    viewsBtn.classList.toggle("active", active);
-    viewsBtn.setAttribute("aria-pressed", active ? "true" : "false");
-  }
 }
 
 // ---------- filters ----------
-
 function initFilters() {
-  sections = Array.from(document.querySelectorAll(".content-section"));
+  const filtersDiv = document.getElementById("filters");
+  if (!filtersDiv) return;
 
-  const typeButtonsContainer = document.getElementById("type-buttons");
-  const memeButtonsContainer = document.getElementById("meme-buttons");
-  const keywordButtonsContainer = document.getElementById("keywords-buttons");
+  const typesFilter = filtersDiv.querySelector("#type-filter");
+  const memeFilter = filtersDiv.querySelector("#meme-filter");
+  const keywordsFilter = filtersDiv.querySelector("#keywords-filter");
 
-  const typeOptions = new Set();
-  const memeOptions = new Set();
-  const keywordOptions = new Set();
+  if (typesFilter) {
+    typesFilter.addEventListener("change", (event) => {
+      currentFilters.type = event.target.value;
+      filterItems();
+    });
+  }
 
-  sections.forEach(section => {
-    const typeStr = (section.dataset.type || "").trim();
-    if (typeStr) typeStr.split(/[\s,]+/).map(t => t.trim()).filter(Boolean).forEach(t => typeOptions.add(t.toUpperCase()));
+  if (memeFilter) {
+    memeFilter.addEventListener("change", (event) => {
+      currentFilters.meme = event.target.value;
+      filterItems();
+    });
+  }
 
-    const memeStr = (section.dataset.meme || "").toLowerCase().trim();
-    if (memeStr) memeOptions.add(memeStr);
-
-    const kwStr = (section.dataset.keywords || "").toLowerCase().trim();
-    if (kwStr) kwStr.split(",").map(k => k.trim()).filter(Boolean).forEach(k => { if (!MBTI_SET.has(k.toUpperCase())) keywordOptions.add(k); });
-  });
-
-  MBTI_TYPES.forEach(t => typeOptions.add(t));
-
-  if (sections.some(s => (s.dataset.type || "").toUpperCase().includes("NON-MBTI"))) typeOptions.add("NON-MBTI");
-
-  buildFilterButtons(typeButtonsContainer, Array.from(typeOptions).sort(), "type");
-  buildFilterButtons(memeButtonsContainer, Array.from(memeOptions).sort(), "meme");
-  buildFilterButtons(keywordButtonsContainer, Array.from(keywordOptions).sort(), "keywords");
-}
-
-function buildFilterButtons(container, values, filterType) {
-  if (!container) return;
-  container.innerHTML = "";
-
-  const allBtn = document.createElement("button");
-  allBtn.textContent = "All";
-  allBtn.dataset.filterType = filterType;
-  allBtn.dataset.value = "all";
-  allBtn.addEventListener("click", () => filterSections(filterType, "all"));
-  container.appendChild(allBtn);
-
-  values.forEach(val => {
-    if (!val || typeof val !== "string") return;
-    const btn = document.createElement("button");
-    btn.dataset.filterType = filterType;
-
-    if (filterType === "type") btn.dataset.value = val.toUpperCase(), btn.textContent = displayType(val.toUpperCase());
-    else if (filterType === "meme") btn.dataset.value = val, btn.textContent = toTitleCase(val);
-    else btn.dataset.value = val, btn.textContent = val;
-
-    btn.addEventListener("click", () => filterSections(filterType, btn.dataset.value));
-    container.appendChild(btn);
-  });
-}
-
-function filterSections(filterType, value) {
-  if (!sections || !sections.length) sections = Array.from(document.querySelectorAll(".content-section"));
-  currentFilters[filterType] = value === currentFilters[filterType] ? "all" : value;
-
-  document.querySelectorAll(`button[data-filter-type="${filterType}"]`).forEach(btn => {
-    const isActive = btn.dataset.value === currentFilters[filterType] && currentFilters[filterType] !== "all";
-    btn.classList.toggle("active", isActive);
-    btn.setAttribute("aria-pressed", isActive ? "true" : "false");
-  });
-
-  sections.forEach(section => {
-    let matches = true;
-
-    for (const [fType, fVal] of Object.entries(currentFilters)) {
-      if (fVal === "all") continue;
-
-      if (fType === "type") {
-        const secTypes = (section.dataset.type || "").toUpperCase().split(/[\s,]+/).map(t => t.trim()).filter(Boolean);
-        matches = fVal === "NON-MBTI" ? !secTypes.some(t => MBTI_SET.has(t)) : secTypes.includes(fVal);
-      } else if (fType === "meme") matches = (section.dataset.meme || "").toLowerCase().trim() === fVal;
-      else if (fType === "keywords") {
-        const kws = (section.dataset.keywords || "").toLowerCase().split(",").map(k => k.trim()).filter(Boolean);
-        matches = fVal.includes(" ") ? kws.some(kw => kw === fVal) : kws.some(kw => kw.includes(fVal));
-      }
-    }
-
-    section.style.display = matches ? "block" : "none";
-  });
-}
-
-function displayType(type) {
-  switch (type) {
-    case "ESTP": return "The Entrepreneur";
-    case "ISTP": return "The Virtuoso";
-    case "ESFP": return "The Entertainer";
-    case "ISFP": return "The Adventurer";
-    case "ESTJ": return "The Executive";
-    case "ISTJ": return "The Logistician";
-    case "ESFJ": return "The Consul";
-    case "ISFJ": return "The Defender";
-    case "ENFP": return "The Campaigner";
-    case "INFP": return "The Mediator";
-    case "ENFJ": return "The Protagonist";
-    case "INFJ": return "The Advocate";
-    case "ENTJ": return "The Commander";
-    case "INTJ": return "The Architect";
-    case "ENTP": return "The Debater";
-    case "INTP": return "The Thinker";
-    default: return type;
+  if (keywordsFilter) {
+    keywordsFilter.addEventListener("change", (event) => {
+      currentFilters.keywords = event.target.value;
+      filterItems();
+    });
   }
 }
 
-function toTitleCase(str) {
-  return str.replace(/\b\w/g, function(l) { return l.toUpperCase(); });
+function filterItems() {
+  const sections = document.querySelectorAll(".content-section");
+  sections.forEach(section => {
+    const matchesType = currentFilters.type === "all" || section.dataset.type.includes(currentFilters.type);
+    const matchesMeme = currentFilters.meme === "all" || section.dataset.meme.includes(currentFilters.meme);
+    const matchesKeywords = currentFilters.keywords === "all" || section.dataset.keywords.includes(currentFilters.keywords);
+
+    if (matchesType && matchesMeme && matchesKeywords) {
+      section.style.display = "";
+    } else {
+      section.style.display = "none";
+    }
+  });
 }
 
+// ---------- sorting ----------
+function initSortControls() {
+  const sortByAgeBtn = document.getElementById("sort-by-age");
+  const sortByViewsBtn = document.getElementById("sort-by-views");
+
+  if (sortByAgeBtn) {
+    sortByAgeBtn.addEventListener("click", () => {
+      sortState.mode = "age";
+      sortState.ageDirection = sortState.ageDirection === "newest" ? "oldest" : "newest";
+      sortFeed();
+    });
+  }
+
+  if (sortByViewsBtn) {
+    sortByViewsBtn.addEventListener("click", () => {
+      sortState.mode = "views";
+      sortFeed();
+    });
+  }
+}
+
+function sortFeed() {
+  const sections = Array.from(document.querySelectorAll(".content-section"));
+  sections.sort((a, b) => {
+    const aValue = sortState.mode === "age" 
+      ? parseInt(a.dataset.index, 10) 
+      : parseInt(a.dataset.views, 10);
+    const bValue = sortState.mode === "age" 
+      ? parseInt(b.dataset.index, 10) 
+      : parseInt(b.dataset.views, 10);
+
+    if (sortState.mode === "age") {
+      return sortState.ageDirection === "newest" ? bValue - aValue : aValue - bValue;
+    } else {
+      return bValue - aValue;
+    }
+  });
+
+  const main = document.querySelector("main");
+  if (main) {
+    main.innerHTML = "";
+    sections.forEach(section => main.appendChild(section));
+  }
+}
+
+// utility function
 function numberWithCommas(x) {
   return x.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+}
+
+11 lines
+
+function escapeHtml(text) {
+  const map = {
+    '&': '&amp;',
+    '<': '&lt;',
+    '>': '&gt;',
+    '"': '&quot;',
+    "'": '&#039;'
+  };
+  return (text || '').replace(/[&<>"']/g, function(m) { return map[m]; });
 }
