@@ -592,7 +592,7 @@ function filterSections(filterType, value) {
 
 // ---------- helpers ----------
 
-function unescapeHtml(s) {
+function escapeHtml(s) {
   return String(s).replace(/&(amp|lt|gt|quot|#39);/g, c => {
     switch (c) {
       case "&amp;":
