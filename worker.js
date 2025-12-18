@@ -1,26 +1,26 @@
-// worker.js — incremental + throttled Imgflip scraping (compliant approach)
-// ----------------------------------------------------------------------
+// worker.js
+// ---------------------------------------------------
+// Imgflip feed worker
+// - KV key renamed to: "imgflip"
+// - Parses ONLY page 1 for new items (latest listing)
+// - Updates views by scanning all items in small batches
+// ---------------------------------------------------
 
 const USERNAME = "mbtininja";
-const LIST_BASE = `https://imgflip.com/all/user-images/${USERNAME}?sort=latest`;
+const LIST_PAGE_1 = `https://imgflip.com/all/user-images/${USERNAME}?sort=latest`;
 
-const KV_FEED_KEY = "imgflip";
-const KV_META_KEY = "imgflip-feed-meta-v1"; // cursor + seen ids
-const FEED_TTL_SECONDS = 900;
+const KV_FEED_KEY = "imgflip"; // renamed from imgflip-feed-v2
+const KV_VIEWS_CURSOR_KEY = "imgflip-views-cursor";
 
-// Safety caps (keep these conservative)
-const MAX_LIST_PAGES_PER_REFRESH = 3;     // don’t walk hundreds of pages per run
-const MAX_ITEMS_TOTAL = 600;              // max items stored in feed
-const MAX_ITEM_ENRICH_PER_REFRESH = 40;   // enrich only N item pages per refresh
-const CONCURRENCY = 2;                    // low concurrency reduces blocks
-const THROTTLE_MS = 450;                  // delay between item fetches
+const FEED_SOFT_CACHE_SECONDS = 900; // return cached payload if refreshed recently and fresh!=1
+const VIEWS_BATCH_SIZE = 60; // updates views for this many items per refresh to reduce scraping load
+const VIEWS_CONCURRENCY = 3;
 
 const IMGFLIP_HEADERS = {
-  "User-Agent":
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
-  Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+  "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+  "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
   "Accept-Language": "en-US,en;q=0.9",
-  Referer: `https://imgflip.com/user/${USERNAME}`
+  "Referer": `https://imgflip.com/user/${USERNAME}`
 };
 
 const MBTI_TYPES = new Set([
@@ -30,14 +30,13 @@ const MBTI_TYPES = new Set([
   "ENTJ","INTJ","ENTP","INTP"
 ]);
 
-// Tags you do NOT want as “keywords”
 const MEME_TYPE_EXCLUDE = new Set([
   "mbti","myers briggs","myers-briggs","personality",
   "meme","memes","fun","fun stream","psychology"
 ]);
 
 export default {
-  async fetch(request, env) {
+  async fetch(request, env, ctx) {
     const url = new URL(request.url);
 
     if (request.method === "OPTIONS") {
@@ -46,7 +45,9 @@ export default {
 
     if (url.pathname === "/feed") {
       const fresh = url.searchParams.get("fresh") === "1";
-      return handleFeed(env, fresh);
+      const viewsAll = url.searchParams.get("views") === "all";
+      const payload = await handleFeed(env, { fresh, viewsAll });
+      return jsonResponse(payload);
     }
 
     if (url.pathname === "/kym") {
@@ -56,230 +57,394 @@ export default {
     return new Response("Not found", { status: 404, headers: basicHeaders() });
   },
 
+  // Cron: refresh feed on schedule
   async scheduled(event, env, ctx) {
-    // Cron refresh: build + cache feed in KV
-    ctx.waitUntil(buildAndCacheFeed(env));
+    ctx.waitUntil(handleFeed(env, { fresh: true, viewsAll: false, scheduled: true }).catch(() => {}));
   }
 };
-
-// =========================================================
-// HTTP helpers
-// =========================================================
-
-function basicHeaders() {
-  return {
-    "Access-Control-Allow-Origin": "*",
-    "Access-Control-Allow-Methods": "GET,OPTIONS",
-    "Access-Control-Allow-Headers": "Content-Type"
-  };
-}
-
-function jsonResponse(body, status = 200) {
-  return new Response(JSON.stringify(body), {
-    status,
-    headers: { ...basicHeaders(), "Content-Type": "application/json" }
-  });
-}
-
-function redirect(loc) {
-  return new Response(null, {
-    status: 302,
-    headers: { ...basicHeaders(), Location: loc }
-  });
-}
-
-function sleep(ms) {
-  return new Promise(r => setTimeout(r, ms));
-}
-
-// =========================================================
-// FETCH WITH RETRY (polite + backoff)
-// =========================================================
-
-async function fetchWithRetry(url, options = {}, retries = 3, baseDelay = 900) {
-  const { headers = IMGFLIP_HEADERS, ...rest } = options;
-
-  for (let attempt = 1; attempt <= retries; attempt++) {
-    try {
-      const res = await fetch(url, { headers, ...rest });
-
-      if (res.ok) return res;
-
-      // Treat these as transient / throttling
-      if (res.status === 429 || res.status === 503) {
-        if (attempt < retries) {
-          await sleep(baseDelay * attempt + Math.floor(Math.random() * 250));
-          continue;
-        }
-      }
-
-      if (attempt === retries) throw new Error(`HTTP ${res.status}`);
-    } catch (err) {
-      if (attempt < retries) {
-        await sleep(baseDelay * attempt + Math.floor(Math.random() * 250));
-      } else {
-        throw err;
-      }
-    }
-  }
-
-  throw new Error("Max retries exceeded");
-}
 
 // =========================================================
 // FEED HANDLER
 // =========================================================
 
-async function handleFeed(env, fresh) {
+async function handleFeed(env, opts) {
   const kv = env.NINJAMEMES;
 
-  if (!fresh) {
-    const cached = await kv.get(KV_FEED_KEY);
-    if (cached) {
-      try {
-        const parsed = JSON.parse(cached);
-        if (parsed && Array.isArray(parsed.items)) return jsonResponse(parsed);
-      } catch {}
+  const existing = await readPayload(kv);
+
+  // soft-cache: if not forcing fresh, return if recently updated
+  if (!opts.fresh && existing && existing.updated_at) {
+    const ageMs = Date.now() - Date.parse(existing.updated_at);
+    if (Number.isFinite(ageMs) && ageMs >= 0 && ageMs < FEED_SOFT_CACHE_SECONDS * 1000) {
+      return existing;
     }
   }
 
-  // If /feed?fresh=1, or cache miss: rebuild
-  const payload = await buildAndCacheFeed(env);
-  return jsonResponse(payload);
+  // Step 1: parse ONLY page 1 listing for latest ids
+  const page1Html = await fetchHtml(LIST_PAGE_1);
+  const page1Ids = parseIdsFromListingPage(page1Html);
+
+  // Step 2: merge with existing KV items
+  const prevItems = Array.isArray(existing.items) ? existing.items : [];
+  const prevById = new Map(prevItems.map(it => [String(it.id), it]));
+
+  const merged = [];
+
+  // Keep “page 1” items at the front in the order they appear on the listing page.
+  for (const id of page1Ids) {
+    const existingItem = prevById.get(id);
+    if (existingItem) {
+      merged.push(existingItem);
+      prevById.delete(id);
+    } else {
+      // New item: fetch full details from its item page
+      const item = await fetchItemDetails(id);
+      merged.push(item || minimalItemFromId(id));
+    }
+  }
+
+  // Append remaining existing items (older items) in their previous order.
+  for (const it of prevItems) {
+    const id = String(it.id);
+    if (page1Ids.includes(id)) continue;
+    merged.push(it);
+  }
+
+  // Step 3: update views (all items in batches by default)
+  await updateViews(kv, merged, { viewsAll: Boolean(opts.viewsAll) });
+
+  const payload = {
+    updated_at: new Date().toISOString(),
+    count: merged.length,
+    items: merged
+  };
+
+  await kv.put(KV_FEED_KEY, JSON.stringify(payload));
+  return payload;
 }
 
-/**
- * Build feed incrementally:
- * - Load previous feed + meta (seen ids + cursor)
- * - Crawl only a few newest list pages
- * - Merge ids, keep MAX_ITEMS_TOTAL
- * - Enrich only a limited number of items per run
- */
-async function buildAndCacheFeed(env) {
-  const kv = env.NINJAMEMES;
+async function readPayload(kv) {
+  const raw = await kv.get(KV_FEED_KEY);
+  if (!raw) return { updated_at: "", count: 0, items: [] };
+  try {
+    const parsed = JSON.parse(raw);
+    if (parsed && Array.isArray(parsed.items)) return parsed;
+  } catch {}
+  return { updated_at: "", count: 0, items: [] };
+}
 
-  const priorFeed = await loadJsonKV(kv, KV_FEED_KEY) || { items: [] };
-  const priorItems = Array.isArray(priorFeed.items) ? priorFeed.items : [];
+// =========================================================
+// VIEW UPDATER
+// =========================================================
 
-  const meta = await loadJsonKV(kv, KV_META_KEY) || { cursor: null, seen: [] };
-  const seen = new Set(Array.isArray(meta.seen) ? meta.seen : []);
+async function updateViews(kv, items, opts) {
+  if (!Array.isArray(items) || !items.length) return;
 
-  // 1) Get latest IDs from listing pages (few pages only)
-  const latestIds = await collectIdsFromAllPages({
-    maxPages: MAX_LIST_PAGES_PER_REFRESH,
-    maxItems: MAX_ITEMS_TOTAL
-  });
+  let indices = [];
 
-  // 2) Merge IDs: newest first, then prior
-  const mergedIds = [];
-  for (const id of latestIds) {
-    if (!seen.has(id)) {
-      seen.add(id);
-    }
-    mergedIds.push(id);
-  }
-  // Append any old ids we already had, preserving older content
-  for (const item of priorItems) {
-    const id = String(item?.id || "").trim();
-    if (!id) continue;
-    if (!mergedIds.includes(id)) mergedIds.push(id);
-  }
+  if (opts.viewsAll) {
+    indices = items.map((_, i) => i);
+  } else {
+    const cursorRaw = await kv.get(KV_VIEWS_CURSOR_KEY);
+    let cursor = parseInt(cursorRaw || "0", 10);
+    if (!Number.isFinite(cursor) || cursor < 0) cursor = 0;
 
-  // Cap total
-  const finalIds = mergedIds.slice(0, MAX_ITEMS_TOTAL);
+    const n = items.length;
+    const batch = Math.min(VIEWS_BATCH_SIZE, n);
 
-  // 3) Index prior items by id for reuse
-  const byId = new Map();
-  for (const it of priorItems) {
-    if (it && it.id) byId.set(String(it.id), it);
-  }
-
-  // 4) Determine which items need enrichment
-  // “Needs enrichment” = looks like minimal / missing core fields
-  const toEnrich = [];
-  for (const id of finalIds) {
-    const existing = byId.get(id);
-    if (!existing) {
-      toEnrich.push(id);
-      continue;
+    indices = new Array(batch);
+    for (let k = 0; k < batch; k++) {
+      indices[k] = (cursor + k) % n;
     }
 
-    const title = String(existing.title || "");
-    const memeType = String(existing.meme_type || "");
-    const hasKeywords = Array.isArray(existing.keywords) && existing.keywords.length > 0;
-    const hasAge = String(existing.age_text || "").length > 0;
-
-    const looksMinimal =
-      title === id ||
-      (!memeType && !hasKeywords && !hasAge);
-
-    if (looksMinimal) toEnrich.push(id);
+    const nextCursor = (cursor + batch) % n;
+    await kv.put(KV_VIEWS_CURSOR_KEY, String(nextCursor));
   }
 
-  // Only enrich a limited number each refresh
-  const enrichIds = toEnrich.slice(0, MAX_ITEM_ENRICH_PER_REFRESH);
+  // concurrency worker loop
+  let p = 0;
+  async function loop() {
+    while (p < indices.length) {
+      const my = p++;
+      const idx = indices[my];
+      const item = items[idx];
+      if (!item || !item.id) continue;
 
-  // 5) Fetch + parse item pages (throttled)
-  let idx = 0;
-  const results = new Map();
-
-  async function enrichLoop() {
-    while (idx < enrichIds.length) {
-      const my = idx++;
-      const id = enrichIds[my];
-
-      try {
-        // Throttle between attempts
-        if (my > 0) await sleep(THROTTLE_MS);
-
-        const item = await fetchItemDetails(id);
-        if (item) results.set(id, item);
-      } catch {
-        // Keep existing / minimal; do not fail whole run
+      const view = await fetchViewsOnly(String(item.id));
+      if (typeof view === "number" && Number.isFinite(view)) {
+        item.views = view;
       }
     }
   }
 
-  await Promise.all(Array.from({ length: CONCURRENCY }, enrichLoop));
-
-  // 6) Build final items array in id order
-  const items = finalIds.map(id => {
-    const enriched = results.get(id);
-    if (enriched) return enriched;
-
-    const existing = byId.get(id);
-    if (existing) return normalizeItem(existing);
-
-    return minimalItemFromId(id);
-  });
-
-  const payload = {
-    updated_at: new Date().toISOString(),
-    count: items.length,
-    items
-  };
-
-  // 7) Save feed + meta
-  await kv.put(KV_FEED_KEY, JSON.stringify(payload), { expirationTtl: FEED_TTL_SECONDS });
-
-  // Keep meta a bit longer than feed TTL so incremental can continue
-  const metaPayload = {
-    cursor: null,
-    seen: Array.from(seen).slice(-5000)
-  };
-  await kv.put(KV_META_KEY, JSON.stringify(metaPayload), { expirationTtl: 60 * 60 * 24 * 7 });
-
-  return payload;
+  await Promise.all(Array.from({ length: VIEWS_CONCURRENCY }, loop));
 }
 
-async function loadJsonKV(kv, key) {
+// =========================================================
+// LISTING PAGE PARSER (PAGE 1 ONLY)
+// =========================================================
+
+function parseIdsFromListingPage(html) {
+  if (!html) return [];
+
+  const ids = [];
+  const seen = new Set();
+
+  // primary: links like href="/i/af902h"
+  const hrefRe = /href=["']\/i\/([A-Za-z0-9]+)["']/g;
+  let m;
+  while ((m = hrefRe.exec(html))) {
+    const id = m[1];
+    if (!seen.has(id)) {
+      seen.add(id);
+      ids.push(id);
+    }
+  }
+
+  // fallback: image URLs like i.imgflip.com/af902h.jpg
+  const imgRe = /\/\/i\.imgflip\.com\/([A-Za-z0-9]+)\.(?:jpg|png|gif|webp)/g;
+  while ((m = imgRe.exec(html))) {
+    const id = m[1];
+    if (!seen.has(id)) {
+      seen.add(id);
+      ids.push(id);
+    }
+  }
+
+  return ids;
+}
+
+// =========================================================
+// ITEM PAGE FETCH + PARSE
+// =========================================================
+
+async function fetchItemDetails(id) {
+  const pageUrl = `https://imgflip.com/i/${id}`;
+  const html = await fetchHtml(pageUrl);
+  if (!html) return null;
+
+  const item = minimalItemFromId(id);
+  item.page_url = pageUrl;
+
+  // Try __NEXT_DATA__
+  const next = extractNextData(html);
+  const node = next ? findBestImageNode(next, id) : null;
+
+  // Prefer structured parse if possible
+  if (node) {
+    applyNodeToItem(item, node, id);
+    return finalizeItem(item);
+  }
+
+  // Fallback: minimal but try views
+  const v = extractViewsFromHtml(html);
+  if (Number.isFinite(v)) item.views = v;
+
+  // Also try title from <title> as last resort
+  const tMatch = html.match(/<title[^>]*>([\s\S]*?)<\/title>/i);
+  if (tMatch) item.title = decode(strip(tMatch[1])).trim() || id;
+
+  return finalizeItem(item);
+}
+
+async function fetchViewsOnly(id) {
+  const url = `https://imgflip.com/i/${id}`;
+  const html = await fetchHtml(url);
+  if (!html) return null;
+
+  // Fast path: regex for ensighten_views in HTML
+  const v = extractViewsFromHtml(html);
+  if (Number.isFinite(v)) return v;
+
+  // Structured fallback
+  const next = extractNextData(html);
+  if (!next) return null;
+
+  const node = findBestImageNode(next, id);
+  if (!node) return null;
+
+  const views = node.ensighten_views ?? node.views;
+  const n = Number(views);
+  return Number.isFinite(n) ? n : null;
+}
+
+function extractViewsFromHtml(html) {
+  if (!html) return null;
+
+  const m1 = html.match(/"ensighten_views"\s*:\s*([0-9]+)/);
+  if (m1) return Number(m1[1]);
+
+  // If ensighten_views isn’t present, look for a views field in __NEXT_DATA__ slice
+  const next = extractNextDataRaw(html);
+  if (next) {
+    const m2 = next.match(/"views"\s*:\s*([0-9]+)/);
+    if (m2) return Number(m2[1]);
+  }
+
+  return null;
+}
+
+function extractNextDataRaw(html) {
+  const match = html.match(/<script[^>]+id=["']__NEXT_DATA__["'][^>]*>([\s\S]*?)<\/script>/);
+  if (!match) return "";
+  return match[1] || "";
+}
+
+function extractNextData(html) {
+  const raw = extractNextDataRaw(html);
+  if (!raw) return null;
   try {
-    const v = await kv.get(key);
-    if (!v) return null;
-    return JSON.parse(v);
+    return JSON.parse(raw);
   } catch {
     return null;
   }
+}
+
+// Heuristic: find an object that looks like the Imgflip “image” node for this id.
+function findBestImageNode(root, id) {
+  const queue = [root];
+  const seen = new Set();
+
+  while (queue.length) {
+    const cur = queue.shift();
+    if (!cur || typeof cur !== "object") continue;
+    if (seen.has(cur)) continue;
+    seen.add(cur);
+
+    // Candidate checks
+    const curId = cur.id != null ? String(cur.id) : "";
+    const url = cur.url != null ? String(cur.url) : (cur.image_url != null ? String(cur.image_url) : "");
+
+    const looksRight =
+      (curId === id) ||
+      (url && url.includes(id)) ||
+      (cur.page_url && String(cur.page_url).includes(`/i/${id}`));
+
+    const hasUsefulFields =
+      ("title" in cur) ||
+      ("tags" in cur) ||
+      ("ensighten_views" in cur) ||
+      ("views" in cur) ||
+      ("template" in cur) ||
+      ("url" in cur) ||
+      ("image_url" in cur);
+
+    if (looksRight && hasUsefulFields) {
+      return cur;
+    }
+
+    // Traverse
+    for (const k of Object.keys(cur)) {
+      const v = cur[k];
+      if (v && typeof v === "object") queue.push(v);
+    }
+  }
+
+  // Common fallback path (if present)
+  const direct = root?.props?.pageProps?.image;
+  if (direct && typeof direct === "object") return direct;
+
+  return null;
+}
+
+function applyNodeToItem(item, node, id) {
+  // title
+  const t = node.title != null ? String(node.title).trim() : "";
+  item.title = t || id;
+
+  // views
+  const v = node.ensighten_views ?? node.views;
+  const vn = Number(v);
+  item.views = Number.isFinite(vn) ? vn : (item.views || 0);
+
+  // age / timestamps
+  if (node.created_at != null) item.age_text = String(node.created_at);
+  if (node.createdAt != null && !item.age_text) item.age_text = String(node.createdAt);
+
+  // image URL
+  const rawUrl = node.url ?? node.image_url ?? node.imageUrl ?? "";
+  if (rawUrl) {
+    let u = String(rawUrl);
+    if (u.startsWith("//")) u = "https:" + u;
+    item.image_url = u;
+    item.is_gif = u.toLowerCase().endsWith(".gif");
+  }
+
+  // tags (strings, or objects with name)
+  let tags = [];
+  if (Array.isArray(node.tags)) {
+    tags = node.tags.map(t => {
+      if (t == null) return "";
+      if (typeof t === "string") return t;
+      if (typeof t === "object" && t.name) return String(t.name);
+      return String(t);
+    });
+  }
+  tags = tags.map(s => String(s).toLowerCase().trim()).filter(Boolean);
+  item.tags = tags;
+
+  // meme_type from template name if available
+  if (node.template?.name) {
+    const raw = String(node.template.name).replace(/ meme$/i, "");
+    const mt = toTitleCase(raw);
+    item.meme_type = mt;
+    item.kym_slug = slugifyForKym(mt);
+  } else if (!item.meme_type) {
+    // fallback: first non-MBTI, non-excluded tag
+    const mtTag = tags.find(t => {
+      const upper = t.toUpperCase();
+      if (MBTI_TYPES.has(upper)) return false;
+      if (MEME_TYPE_EXCLUDE.has(t)) return false;
+      return true;
+    });
+    if (mtTag) {
+      const mt = toTitleCase(mtTag);
+      item.meme_type = mt;
+      item.kym_slug = slugifyForKym(mt);
+    }
+  }
+
+  // MBTI + keywords
+  item.mbti_types = [];
+  item.keywords = [];
+
+  for (const t of tags) {
+    const upper = t.toUpperCase();
+    if (MBTI_TYPES.has(upper)) {
+      item.mbti_types.push(upper);
+    } else {
+      // keep keywords even if they’re excluded for meme_type selection
+      item.keywords.push(t);
+    }
+  }
+
+  // If meme_type exists, avoid duplicating it as a keyword
+  if (item.meme_type) {
+    const memeLower = String(item.meme_type).toLowerCase();
+    item.keywords = item.keywords.filter(k => k !== memeLower);
+  }
+
+  // Ensure “memes” keyword when tag has memes
+  if (tags.includes("memes") && !item.keywords.includes("memes")) {
+    item.keywords.push("memes");
+  }
+}
+
+function finalizeItem(item) {
+  // de-dupe arrays
+  item.mbti_types = Array.from(new Set((item.mbti_types || []).map(s => String(s).toUpperCase()).filter(Boolean)));
+  item.keywords = Array.from(new Set((item.keywords || []).map(s => String(s).toLowerCase().trim()).filter(Boolean)));
+  item.tags = Array.from(new Set((item.tags || []).map(s => String(s).toLowerCase().trim()).filter(Boolean)));
+
+  // ensure kym_slug consistency
+  if (!item.kym_slug && item.meme_type) {
+    item.kym_slug = slugifyForKym(item.meme_type);
+  }
+  if (item.kym_slug === "null") item.kym_slug = null;
+
+  // sanity: must have id
+  if (!item.id) return null;
+  return item;
 }
 
 // =========================================================
@@ -302,6 +467,13 @@ async function handleKym(url) {
   );
 }
 
+function redirect(loc) {
+  return new Response(null, {
+    status: 302,
+    headers: { ...basicHeaders(), Location: loc }
+  });
+}
+
 async function urlExists(url) {
   try {
     const r = await fetch(url, { method: "HEAD", headers: IMGFLIP_HEADERS });
@@ -312,253 +484,35 @@ async function urlExists(url) {
 }
 
 // =========================================================
-// LISTING PAGE ID CRAWLER (fixed)
+// HTML FETCHING (retry + bot/captcha guard)
 // =========================================================
 
-async function collectIdsFromAllPages({ maxPages, maxItems }) {
-  const seen = new Set();
-  const ids = [];
-  const visitedCursors = new Set();
+async function fetchWithRetry(url, options = {}, retries = 3, delay = 900) {
+  const { headers = IMGFLIP_HEADERS, ...rest } = options;
 
-  let cursor = null;
-  let page = 0;
+  for (let attempt = 1; attempt <= retries; attempt++) {
+    try {
+      const res = await fetch(url, { headers, ...rest });
+      if (res.ok) return res;
 
-  while (page < maxPages && ids.length < maxItems) {
-    const url = cursor ? `${LIST_BASE}&after=${encodeURIComponent(cursor)}` : LIST_BASE;
-    page++;
-
-    const html = await fetchHtml(url);
-    if (!html) break;
-
-    const imgRegex =
-      /(?:https?:)?\/\/i\.imgflip\.com\/([A-Za-z0-9]+)\.(?:jpg|png|gif|webp)/g;
-
-    let m;
-    let gotAny = false;
-
-    while ((m = imgRegex.exec(html))) {
-      const id = m[1]; // FIX: use capture group
-      if (!isLikelyImgflipId(id)) continue;
-
-      if (!seen.has(id)) {
-        seen.add(id);
-        ids.push(id);
-        gotAny = true;
-        if (ids.length >= maxItems) break;
+      if (res.status === 429 || res.status === 503) {
+        if (attempt < retries) {
+          await sleep(delay * attempt);
+          continue;
+        }
+      }
+      if (attempt === retries) throw new Error(`HTTP ${res.status}`);
+    } catch (err) {
+      if (attempt < retries) {
+        await sleep(delay * attempt);
+      } else {
+        throw err;
       }
     }
-
-    if (!gotAny) break;
-
-    // Try to find Next cursor; be tolerant of markup changes
-    const nextCursor =
-      (html.match(/href="[^"]*after=([0-9A-Za-z]+)[^"]*"\s*[^>]*>\s*Next/i) || [])[1] ||
-      (html.match(/after=([0-9A-Za-z]+)[^"']*["'][^>]*>\s*Next/i) || [])[1];
-
-    if (!nextCursor) break;
-    if (visitedCursors.has(nextCursor)) break;
-
-    visitedCursors.add(nextCursor);
-    cursor = nextCursor;
   }
 
-  return ids;
+  throw new Error("Max retries exceeded");
 }
-
-function isLikelyImgflipId(id) {
-  // Imgflip ids are alnum, typically ~6 chars but can vary
-  return typeof id === "string" && /^[A-Za-z0-9]{5,12}$/.test(id);
-}
-
-// =========================================================
-// FETCH INDIVIDUAL ITEM PAGE
-// =========================================================
-
-async function fetchItemDetails(id) {
-  const url = `https://imgflip.com/i/${id}`;
-  const html = await fetchHtml(url);
-  if (!html) return null;
-  return parseItemPage(html, id, url);
-}
-
-// =========================================================
-// PARSER — JSON + fallback, with consistent keyword filtering
-// =========================================================
-
-function parseItemPage(html, id, pageUrl) {
-  const json = extractNextData(html);
-  const img = json?.props?.pageProps?.image;
-  if (img) return normalizeItem(parseFromJson(img, id, pageUrl));
-  return normalizeItem(oldParse(html, id, pageUrl));
-}
-
-function extractNextData(html) {
-  const match = html.match(
-    /<script[^>]+id=["']__NEXT_DATA__["'][^>]*>([\s\S]*?)<\/script>/
-  );
-  if (!match) return null;
-  try {
-    return JSON.parse(match[1]);
-  } catch {
-    return null;
-  }
-}
-
-function parseFromJson(obj, id, pageUrl) {
-  const item = minimalItemFromId(id);
-
-  item.page_url = pageUrl;
-  item.title = (obj && obj.title) ? String(obj.title) : id;
-
-  const viewsRaw =
-    obj?.ensighten_views ??
-    obj?.views ??
-    obj?.view_count ??
-    obj?.num_views ??
-    0;
-
-  item.views = Number.isFinite(Number(viewsRaw)) ? Number(viewsRaw) : 0;
-
-  item.age_text = obj?.created_at ? String(obj.created_at) : "";
-
-  if (obj?.url) {
-    let u = String(obj.url);
-    if (u.startsWith("//")) u = "https:" + u;
-    item.image_url = u;
-    item.is_gif = u.toLowerCase().endsWith(".gif");
-  }
-
-  // Template-based meme type (best signal)
-  if (obj?.template?.name) {
-    const raw = String(obj.template.name).replace(/ meme$/i, "");
-    item.meme_type = toTitleCase(raw);
-    item.kym_slug = slugifyForKym(item.meme_type);
-  }
-
-  // Tags → mbti_types + keywords (filtered)
-  const tags = Array.isArray(obj?.tags) ? obj.tags : [];
-  item.tags = tags.map(t => String(t).toLowerCase().trim()).filter(Boolean);
-
-  for (const t of item.tags) {
-    const upper = t.toUpperCase();
-    if (MBTI_TYPES.has(upper)) item.mbti_types.push(upper);
-    else item.keywords.push(t);
-  }
-
-  return item;
-}
-
-// Fallback parser (old regex)
-function oldParse(html, id, pageUrl) {
-  const item = minimalItemFromId(id);
-  item.page_url = pageUrl;
-
-  const tMatch =
-    html.match(/<h1[^>]+id=["']img-title["'][^>]*>([\s\S]*?)<\/h1>/i) ||
-    html.match(/<title[^>]*>([\s\S]*?)<\/title>/i);
-
-  if (tMatch) item.title = decode(strip(tMatch[1])).trim();
-
-  const gifMatch = html.match(
-    new RegExp(`["'](?:https?:)?//i\\.imgflip\\.com/${id}\\.gif["']`, "i")
-  );
-  if (gifMatch) {
-    let u = gifMatch[0].replace(/["']/g, "");
-    if (u.startsWith("//")) u = "https:" + u;
-    item.image_url = u;
-    item.is_gif = true;
-  }
-
-  // Tag extraction
-  const tags = [];
-  const tagRegex = /<a[^>]+href=["']\/tag\/[^"']+["'][^>]*>([\s\S]*?)<\/a>/gi;
-  let m;
-  while ((m = tagRegex.exec(html))) {
-    const t = decode(strip(m[1])).trim().toLowerCase();
-    if (t) tags.push(t);
-  }
-  item.tags = tags;
-
-  // Choose meme type from first suitable tag if we don’t have a template name
-  for (const t of tags) {
-    const upper = t.toUpperCase();
-    if (!MBTI_TYPES.has(upper) && !MEME_TYPE_EXCLUDE.has(t) && !item.meme_type) {
-      item.meme_type = toTitleCase(t);
-      item.kym_slug = slugifyForKym(item.meme_type);
-    }
-  }
-
-  for (const t of tags) {
-    const upper = t.toUpperCase();
-    if (MBTI_TYPES.has(upper)) item.mbti_types.push(upper);
-    else item.keywords.push(t);
-  }
-
-  return item;
-}
-
-function normalizeItem(raw) {
-  const item = raw && typeof raw === "object" ? raw : minimalItemFromId("unknown");
-
-  item.id = String(item.id || "").trim();
-  if (!item.id) return minimalItemFromId("unknown");
-
-  item.page_url = item.page_url ? String(item.page_url) : `https://imgflip.com/i/${item.id}`;
-  item.image_url = item.image_url ? String(item.image_url) : `https://i.imgflip.com/${item.id}.jpg`;
-
-  item.title = item.title ? String(item.title) : item.id;
-
-  item.views = Number.isFinite(Number(item.views)) ? Number(item.views) : 0;
-
-  item.meme_type = item.meme_type ? String(item.meme_type) : "";
-  item.kym_slug = item.kym_slug ? String(item.kym_slug) : (item.meme_type ? slugifyForKym(item.meme_type) : null);
-
-  item.age_text = item.age_text ? String(item.age_text) : "";
-
-  item.mbti_types = Array.isArray(item.mbti_types)
-    ? dedupe(item.mbti_types.map(t => String(t).toUpperCase()).filter(t => MBTI_TYPES.has(t)))
-    : [];
-
-  // Ensure keywords exists and is filtered consistently:
-  // - lowercase
-  // - no MBTI types
-  // - no excluded “generic” tags
-  // - no empty strings
-  item.keywords = Array.isArray(item.keywords)
-    ? dedupe(
-        item.keywords
-          .map(k => String(k).toLowerCase().trim())
-          .filter(Boolean)
-          .filter(k => !MBTI_TYPES.has(k.toUpperCase()))
-          .filter(k => !MEME_TYPE_EXCLUDE.has(k))
-      )
-    : [];
-
-  item.tags = Array.isArray(item.tags)
-    ? dedupe(item.tags.map(t => String(t).toLowerCase().trim()).filter(Boolean))
-    : [];
-
-  // Recompute is_gif if missing/incorrect
-  item.is_gif = Boolean(item.is_gif) || item.image_url.toLowerCase().endsWith(".gif");
-
-  return item;
-}
-
-function dedupe(arr) {
-  const out = [];
-  const s = new Set();
-  for (const v of arr) {
-    if (!s.has(v)) {
-      s.add(v);
-      out.push(v);
-    }
-  }
-  return out;
-}
-
-// =========================================================
-// HTML FETCHING (block-aware, no bypass)
-// =========================================================
 
 async function fetchHtml(url) {
   try {
@@ -567,15 +521,9 @@ async function fetchHtml(url) {
       cf: { cacheEverything: true, cacheTtl: 300 }
     });
 
-    if (!res.ok) return "";
-
     const text = await res.text();
-
-    const lower = text.slice(0, 3500).toLowerCase();
-    // If we detect a block page, return empty so we fall back to minimal data.
-    // (We are NOT trying to bypass, only detect and fail safely.)
+    const lower = text.slice(0, 5000).toLowerCase();
     if (lower.includes("captcha") || lower.includes("unusual traffic")) return "";
-
     return text;
   } catch {
     return "";
@@ -583,27 +531,54 @@ async function fetchHtml(url) {
 }
 
 // =========================================================
+// Response helpers
+// =========================================================
+
+function basicHeaders() {
+  return {
+    "Access-Control-Allow-Origin": "*",
+    "Access-Control-Allow-Methods": "GET,OPTIONS",
+    "Access-Control-Allow-Headers": "Content-Type"
+  };
+}
+
+function jsonResponse(body, status = 200) {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: {
+      ...basicHeaders(),
+      "Content-Type": "application/json"
+    }
+  });
+}
+
+// =========================================================
 // Text helpers
 // =========================================================
 
-function strip(s) { return String(s).replace(/<\/?[^>]+>/g, ""); }
+function strip(s) {
+  return String(s || "").replace(/<\/?[^>]+>/g, "");
+}
+
 function decode(s) {
-  return String(s)
+  return String(s || "")
     .replace(/&quot;/g, '"')
     .replace(/&#39;/g, "'")
     .replace(/&amp;/g, "&")
     .replace(/&lt;/g, "<")
     .replace(/&gt;/g, ">");
 }
+
 function toTitleCase(s) {
-  return String(s)
+  return String(s || "")
     .toLowerCase()
     .split(/\s+/)
-    .map(w => (w ? w[0].toUpperCase() + w.slice(1) : w))
+    .map(w => (w ? w.charAt(0).toUpperCase() + w.slice(1) : w))
     .join(" ");
 }
+
 function slugifyForKym(str) {
-  return String(str)
+  return String(str || "")
     .trim()
     .toLowerCase()
     .normalize("NFKD")
@@ -612,14 +587,17 @@ function slugifyForKym(str) {
     .replace(/^-+|-+$/g, "");
 }
 
+function sleep(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
 function minimalItemFromId(id) {
-  const safeId = String(id || "").trim();
   return {
-    id: safeId,
-    page_url: `https://imgflip.com/i/${safeId}`,
-    image_url: `https://i.imgflip.com/${safeId}.jpg`,
+    id,
+    page_url: `https://imgflip.com/i/${id}`,
+    image_url: `https://i.imgflip.com/${id}.jpg`,
     is_gif: false,
-    title: safeId,
+    title: id,
     views: 0,
     meme_type: "",
     mbti_types: [],
