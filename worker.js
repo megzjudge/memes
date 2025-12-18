@@ -1,8 +1,18 @@
-// worker.js — updated with robust Imgflip scraping
-// ---------------------------------------------------
+// worker.js — updated with robust Imgflip scraping (fixed ID collection + parsers)
+// ------------------------------------------------------------------------------
+//
+// Notes on key fixes:
+// - Removed browser WebWorker self.onmessage handler (not used in Cloudflare Workers).
+// - Fixed collectIdsFromAllPages(): capture group usage + next cursor extraction.
+// - Fixed oldParse(): correct regex group usage; fixed title/tag extraction; safer keyword logic.
+// - Hardened parseFromJson(): normalizes tags, views, meme_type fallback.
+// - Kept existing KV caching behavior.
+//
+// Ensure your wrangler.toml binds env.NINJAMEMES to a KV namespace.
 
 const USERNAME = "mbtininja";
 const LIST_BASE = `https://imgflip.com/all/user-images/${USERNAME}?sort=latest`;
+
 const HARD_MAX_ITEMS = 5000;
 const HARD_MAX_LIST_PAGES = 500;
 
@@ -10,10 +20,11 @@ const KV_FEED_KEY = "imgflip-feed-v2";
 const FEED_TTL_SECONDS = 900;
 
 const IMGFLIP_HEADERS = {
-  "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
-  "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+  "User-Agent":
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+  Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
   "Accept-Language": "en-US,en;q=0.9",
-  "Referer": `https://imgflip.com/user/${USERNAME}`
+  Referer: `https://imgflip.com/user/${USERNAME}`
 };
 
 const MBTI_TYPES = new Set([
@@ -55,16 +66,14 @@ export default {
 
 async function fetchWithRetry(url, options = {}, retries = 3, delay = 1000) {
   const { headers = IMGFLIP_HEADERS, ...rest } = options;
-  
+
   for (let attempt = 1; attempt <= retries; attempt++) {
     try {
       console.log(`Fetching ${url} (attempt ${attempt}/${retries})`);
       const res = await fetch(url, { headers, ...rest });
-      
-      if (res.ok) {
-        return res;
-      }
-      
+
+      if (res.ok) return res;
+
       if (res.status === 429 || res.status === 503) {
         console.log(`Rate limited or service unavailable (${res.status}). Retrying...`);
         if (attempt < retries) {
@@ -72,13 +81,11 @@ async function fetchWithRetry(url, options = {}, retries = 3, delay = 1000) {
         }
         continue;
       }
-      
-      if (attempt === retries) {
-        throw new Error(`HTTP ${res.status}`);
-      }
+
+      if (attempt === retries) throw new Error(`HTTP ${res.status}`);
     } catch (err) {
-      console.log(`Attempt ${attempt} failed:`, err.message);
-      
+      console.log(`Attempt ${attempt} failed:`, err && err.message ? err.message : String(err));
+
       if (attempt < retries) {
         await new Promise(resolve => setTimeout(resolve, delay * attempt));
       } else {
@@ -86,35 +93,9 @@ async function fetchWithRetry(url, options = {}, retries = 3, delay = 1000) {
       }
     }
   }
-  
+
   throw new Error("Max retries exceeded");
 }
-
-// =========================================================
-// WEB WORKER MESSAGE HANDLER
-// =========================================================
-
-self.onmessage = async function(event) {
-  const { type, data } = event.data;
-  
-  try {
-    let result;
-    
-    if (type === "fetchItem") {
-      result = await fetchItemDetails(data.id);
-    } else if (type === "fetchHtml") {
-      result = await fetchHtml(data.url);
-    } else if (type === "collectIds") {
-      result = await collectIdsFromAllPages();
-    } else {
-      throw new Error(`Unknown message type: ${type}`);
-    }
-    
-    self.postMessage({ success: true, result });
-  } catch (err) {
-    self.postMessage({ success: false, error: err.message });
-  }
-};
 
 // Helpers -------------------------------------------------
 
@@ -148,7 +129,7 @@ async function handleFeed(env, fresh) {
     if (cached) {
       try {
         const parsed = JSON.parse(cached);
-        if (parsed.items) return jsonResponse(parsed);
+        if (parsed && parsed.items) return jsonResponse(parsed);
       } catch {}
     }
   }
@@ -171,7 +152,7 @@ async function handleFeed(env, fresh) {
         const item = await fetchItemDetails(id);
         items[myIndex] = item || minimalItemFromId(id);
       } catch (err) {
-        console.log("Error fetching id", id, err);
+        console.log("Error fetching id", id, err && err.message ? err.message : String(err));
         items[myIndex] = minimalItemFromId(id);
       }
     }
@@ -191,7 +172,7 @@ async function handleFeed(env, fresh) {
       expirationTtl: FEED_TTL_SECONDS
     });
   } catch (err) {
-    console.log("KV write error:", err);
+    console.log("KV write error:", err && err.message ? err.message : String(err));
   }
 
   return jsonResponse(payload);
@@ -213,8 +194,7 @@ async function handleKym(url) {
   }
 
   return redirect(
-    "https://knowyourmeme.com/search?context=&sort=&q=" +
-      encodeURIComponent(label)
+    "https://knowyourmeme.com/search?context=&sort=&q=" + encodeURIComponent(label)
   );
 }
 
@@ -255,24 +235,27 @@ async function collectIdsFromAllPages() {
     const html = await fetchHtml(url);
     if (!html) break;
 
-    const imgRegex = /(?:https?:)?\/\/i\.imgflip\.com\/([A-Za-z0-9]+)\.(?:jpg|png|gif|webp)/g;
+    const imgRegex =
+      /(?:https?:)?\/\/i\.imgflip\.com\/([A-Za-z0-9]+)\.(?:jpg|png|gif|webp)/g;
+
     let m;
     const got = [];
     while ((m = imgRegex.exec(html))) {
-      const id = m;
-      if (!seen.has(id)) {
+      const id = m[1]; // FIX: capture group (string)
+      if (id && !seen.has(id)) {
         seen.add(id);
         ids.push(id);
         got.push(id);
+        if (ids.length >= HARD_MAX_ITEMS) break;
       }
     }
 
     if (got.length === 0) break;
 
-    const nextMatch = html.match(/after=([0-9A-Za-z]+)[^"']*["'][^>]*> *Next/i);
-    if (!nextMatch) break;
+    // FIX: extract cursor string, not the entire match array
+    const nextMatch = html.match(/after=([0-9A-Za-z]+)[^"']*["'][^>]*>\s*Next/i);
+    const next = nextMatch ? nextMatch[1] : null;
 
-    const next = nextMatch;
     if (!next || visited.has(next)) break;
     visited.add(next);
     cursor = next;
@@ -293,84 +276,149 @@ async function fetchItemDetails(id) {
 }
 
 // =========================================================
-// NEW PARSER — JSON + fallback
+// PARSER — JSON + fallback
 // =========================================================
 
 function parseItemPage(html, id, pageUrl) {
   const json = extractNextData(html);
-  if (json?.props?.pageProps?.image) return parseFromJson(json.props.pageProps.image, id, pageUrl);
+  if (json?.props?.pageProps?.image) {
+    return parseFromJson(json.props.pageProps.image, id, pageUrl);
+  }
   return oldParse(html, id, pageUrl);
 }
 
 function extractNextData(html) {
-  const match = html.match(/<script[^>]+id=["']__NEXT_DATA__["'][^>]*>([\s\S]*?)<\/script>/);
+  const match = html.match(
+    /<script[^>]+id=["']__NEXT_DATA__["'][^>]*>([\s\S]*?)<\/script>/
+  );
   if (!match) return null;
-  try { return JSON.parse(match); } catch { return null; }
+  try {
+    return JSON.parse(match[1]);
+  } catch {
+    return null;
+  }
 }
 
 function parseFromJson(obj, id, pageUrl) {
   const item = minimalItemFromId(id);
   item.page_url = pageUrl;
-  item.title = obj.title || id;
-  item.views = obj.ensighten_views || obj.views || 0;
-  item.age_text = obj.created_at || "";
 
-  if (obj.url) {
-    let u = obj.url.startsWith("//") ? "https:" + obj.url : obj.url;
+  // Title
+  item.title = (obj && obj.title && String(obj.title).trim())
+    ? String(obj.title).trim()
+    : id;
+
+  // Views (Imgflip sometimes uses ensighten_views)
+  const viewsRaw = obj ? (obj.ensighten_views ?? obj.views ?? 0) : 0;
+  const viewsNum = Number(viewsRaw);
+  item.views = Number.isFinite(viewsNum) ? viewsNum : 0;
+
+  // Age text (keep as string; front-end can interpret if needed)
+  item.age_text = (obj && obj.created_at) ? String(obj.created_at) : "";
+
+  // Image URL + GIF detection
+  if (obj && obj.url) {
+    const rawUrl = String(obj.url);
+    const u = rawUrl.startsWith("//") ? "https:" + rawUrl : rawUrl;
     item.image_url = u;
     item.is_gif = u.toLowerCase().endsWith(".gif");
   }
 
-  if (Array.isArray(obj.tags)) item.tags = obj.tags.map(t => t.toLowerCase());
+  // Tags can be strings or objects (harden)
+  const tagsArr = (obj && Array.isArray(obj.tags)) ? obj.tags : [];
+  item.tags = tagsArr
+    .map(t => (typeof t === "string" ? t : (t && t.text ? t.text : "")))
+    .map(t => String(t).toLowerCase().trim())
+    .filter(Boolean);
 
-  if (obj.template?.name) {
-    const raw = obj.template.name.replace(/ meme$/i, "");
+  // Meme type from template if present
+  if (obj && obj.template && obj.template.name) {
+    const raw = String(obj.template.name).replace(/ meme$/i, "");
     item.meme_type = toTitleCase(raw);
     item.kym_slug = slugifyForKym(item.meme_type);
   }
 
+  // Derive MBTI + keywords from tags
   for (const t of item.tags) {
     const upper = t.toUpperCase();
     if (MBTI_TYPES.has(upper)) item.mbti_types.push(upper);
     else item.keywords.push(t);
   }
 
+  // Fallback meme_type from first acceptable tag if template missing
+  if (!item.meme_type) {
+    const candidate = item.tags.find(
+      t => !MBTI_TYPES.has(t.toUpperCase()) && !MEME_TYPE_EXCLUDE.has(t)
+    );
+    if (candidate) {
+      item.meme_type = toTitleCase(candidate);
+      item.kym_slug = slugifyForKym(item.meme_type);
+    }
+  }
+
   return item;
 }
 
 // =========================================================
-// FALLBACK PARSER (old regex)
+// FALLBACK PARSER (regex)
+// =========================================================
+
 function oldParse(html, id, pageUrl) {
   const item = minimalItemFromId(id);
   item.page_url = pageUrl;
 
-  const tMatch = html.match(/<h1[^>]+id=["']img-title["'][^>]*>([\s\S]*?)<\/h1>/i) || html.match(/<title[^>]*>([\s\S]*?)<\/title>/i);
-  if (tMatch) item.title = decode(strip(tMatch)).trim();
+  const tMatch =
+    html.match(/<h1[^>]+id=["']img-title["'][^>]*>([\s\S]*?)<\/h1>/i) ||
+    html.match(/<title[^>]*>([\s\S]*?)<\/title>/i);
 
-  const gifMatch = html.match(new RegExp(`["'](?:https?:)?//i\\.imgflip\\.com/${id}\\.gif["']`, "i"));
-  if (gifMatch) {
-    let u = gifMatch.replace(/["']/g, "");
+  // FIX: use capture group tMatch[1]
+  if (tMatch && tMatch[1]) {
+    item.title = decode(strip(tMatch[1])).trim() || id;
+  }
+
+  // Detect GIF
+  const gifMatch = html.match(
+    new RegExp(`["'](?:https?:)?//i\\.imgflip\\.com/${id}\\.gif["']`, "i")
+  );
+  // FIX: match array -> use [0]
+  if (gifMatch && gifMatch[0]) {
+    let u = gifMatch[0].replace(/["']/g, "");
     item.image_url = u.startsWith("//") ? "https:" + u : u;
     item.is_gif = true;
   }
 
+  // Tags from /tag/ links
   const tags = [];
   let m;
   const tagRegex = /<a[^>]+href=["']\/tag\/[^"']+["'][^>]*>([\s\S]*?)<\/a>/gi;
   while ((m = tagRegex.exec(html))) {
-    const t = decode(strip(m)).trim().toLowerCase();
+    // FIX: use capture group m[1]
+    const t = decode(strip(m[1])).trim().toLowerCase();
     if (t) tags.push(t);
   }
   item.tags = tags;
 
+  // Derive meme_type, mbti_types, keywords
   for (const t of tags) {
     const upper = t.toUpperCase();
-    if (!MBTI_TYPES.has(upper) && !MEME_TYPE_EXCLUDE.has(t) && !item.meme_type) {
+
+    if (MBTI_TYPES.has(upper)) {
+      item.mbti_types.push(upper);
+      continue;
+    }
+
+    if (!item.meme_type && !MEME_TYPE_EXCLUDE.has(t)) {
       item.meme_type = toTitleCase(t);
       item.kym_slug = slugifyForKym(item.meme_type);
+      continue;
     }
-    if (MBTI_TYPES.has(upper)) item.mbti_types.push(upper);
-    else if (t !== item.meme_type.toLowerCase()) item.keywords.push(t);
+
+    // Keywords: keep non-meme-type tags
+    if (item.meme_type && t !== item.meme_type.toLowerCase()) {
+      item.keywords.push(t);
+    } else if (!item.meme_type) {
+      item.keywords.push(t);
+    }
   }
 
   return item;
@@ -382,11 +430,18 @@ function oldParse(html, id, pageUrl) {
 
 async function fetchHtml(url) {
   try {
-    const res = await fetchWithRetry(url, { headers: IMGFLIP_HEADERS, cf: { cacheEverything: true, cacheTtl: 300 } });
+    const res = await fetchWithRetry(url, {
+      headers: IMGFLIP_HEADERS,
+      cf: { cacheEverything: true, cacheTtl: 300 }
+    });
     if (!res.ok) return "";
+
     const text = await res.text();
+
+    // crude bot/captcha detection
     const lower = text.slice(0, 3000).toLowerCase();
     if (lower.includes("captcha") || lower.includes("unusual traffic")) return "";
+
     return text;
   } catch {
     return "";
@@ -397,12 +452,38 @@ async function fetchHtml(url) {
 // Text helpers
 // =========================================================
 
-function strip(s) { return s.replace(/<\/?[^>]+>/g, ""); }
-function decode(s) {
-  return s.replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">");
+function strip(s) {
+  return String(s).replace(/<\/?[^>]+>/g, "");
 }
-function toTitleCase(s) { return s.toLowerCase().split(" ").map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(" "); }
-function slugifyForKym(str) { return str.trim().toLowerCase().normalize("NFKD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, ""); }
+
+function decode(s) {
+  return String(s)
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/&amp;/g, "&")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">");
+}
+
+function toTitleCase(s) {
+  return String(s)
+    .toLowerCase()
+    .split(/\s+/)
+    .filter(Boolean)
+    .map(w => w.charAt(0).toUpperCase() + w.slice(1))
+    .join(" ");
+}
+
+function slugifyForKym(str) {
+  return String(str || "")
+    .trim()
+    .toLowerCase()
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+}
+
 function minimalItemFromId(id) {
   return {
     id,
