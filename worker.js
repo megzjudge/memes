@@ -4,7 +4,7 @@
 const USERNAME = "mbtininja";
 const LIST_BASE = `https://imgflip.com/all/user-images/${USERNAME}?sort=latest`;
 
-const KV_FEED_KEY = "imgflip-feed-v2";
+const KV_FEED_KEY = "imgflip";
 const KV_META_KEY = "imgflip-feed-meta-v1"; // cursor + seen ids
 const FEED_TTL_SECONDS = 900;
 
