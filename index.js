@@ -267,29 +267,83 @@ function renderSections(items) {
   const main = document.querySelector("main");
   if (!main) throw new Error("<main> not found");
 
-  main.innerHTML = "";
-  const frag = document.createDocumentFragment();
+  // ---- Local normalizer + placeholder detector (scoped to renderSections) ----
 
-  items.forEach((item, idx) => {
-    const section = document.createElement("section");
-    section.className = "content-section";
+  function isPlaceholderItem(item) {
+    const id = String(item?.id || "").trim();
+    const title = String(item?.title || "").trim();
+    const memeType = String(item?.meme_type || item?.meme_tag || "").trim();
 
-    const mbtiTypes = Array.isArray(item.mbti_types)
-      ? item.mbti_types.map(t => String(t).toUpperCase())
-      : [];
+    const mbti = Array.isArray(item?.mbti_types) ? item.mbti_types : [];
+    const kw = Array.isArray(item?.keywords) ? item.keywords : [];
+    const tags = Array.isArray(item?.tags) ? item.tags : [];
+    const ageText = String(item?.age_text || "").trim();
+
+    // Tuneable "KV stub" signature:
+    // - title is empty OR equals id
+    // - no memeType, no chips, no age, no kym slug
+    return (
+      id &&
+      (title === "" || title.toLowerCase() === id.toLowerCase()) &&
+      memeType === "" &&
+      mbti.length === 0 &&
+      kw.length === 0 &&
+      tags.length === 0 &&
+      ageText === "" &&
+      item?.kym_slug == null
+    );
+  }
+
+  function normalizeItem(item) {
+    const id = String(item?.id || "").trim();
+    const placeholder = isPlaceholderItem(item);
+
+    const pageUrl = (item && item.page_url)
+      ? String(item.page_url)
+      : (id ? `https://imgflip.com/i/${id}` : "");
+
+    const imageUrl = (item && item.image_url)
+      ? String(item.image_url)
+      : (id ? `https://i.imgflip.com/${id}.jpg` : "");
+
+    const rawMemeType = String(item?.meme_type || item?.meme_tag || "").trim();
+    const memeType = placeholder ? "" : rawMemeType;
+    const memeLower = memeType ? memeType.toLowerCase() : "";
+
+    // Title: do NOT present "title == id" as meaningful
+    let titleRaw = String(item?.title || "").trim();
+    if (!titleRaw || titleRaw.toLowerCase() === id.toLowerCase()) {
+      titleRaw = memeType || id || "Untitled";
+    }
+
+    // Views: prefer future-proof 24h field if Worker adds it
+    const views =
+      typeof item?.views_24h === "number" ? item.views_24h :
+      typeof item?.views === "number" ? item.views :
+      0;
+
+    const showViews = !placeholder && Number.isFinite(views) && views > 0;
+
+    // MBTI types (keep only valid types)
+    const mbtiTypes = placeholder
+      ? []
+      : (Array.isArray(item?.mbti_types)
+          ? item.mbti_types
+              .map(t => String(t).toUpperCase())
+              .filter(t => MBTI_SET.has(t))
+          : []);
+
     const typeList = mbtiTypes.length ? mbtiTypes.join(", ") : "NON-MBTI";
 
-    const rawMemeType = item.meme_type || item.meme_tag || "";
-    const memeType = String(rawMemeType);
-    const memeLower = memeType.toLowerCase();
+    // Keywords/tags: if placeholder, do not fabricate chips
+    const rawKeywords = placeholder
+      ? []
+      : (Array.isArray(item?.keywords)
+          ? item.keywords
+          : Array.isArray(item?.tags)
+          ? item.tags
+          : []);
 
-    const rawKeywords = Array.isArray(item.keywords)
-      ? item.keywords
-      : Array.isArray(item.tags)
-      ? item.tags
-      : [];
-
-    // Normalised keyword list (lowercase)
     let keywordsArr = rawKeywords
       .map(k => String(k).toLowerCase().trim())
       .filter(Boolean);
@@ -297,7 +351,7 @@ function renderSections(items) {
     // Remove anything that is actually an MBTI type
     keywordsArr = keywordsArr.filter(kw => !MBTI_SET.has(kw.toUpperCase()));
 
-    // Ensure "memes" is always present as a keyword if any tag is "memes"/"Memes"
+    // Ensure "memes" is always present if tag "memes" exists
     const hasMemesTag = rawKeywords.some(
       k => String(k).toLowerCase().trim() === "memes"
     );
@@ -307,10 +361,6 @@ function renderSections(items) {
 
     const keywordsStr = keywordsArr.join(",");
 
-    section.dataset.type = typeList;
-    section.dataset.meme = memeLower;
-    section.dataset.keywords = keywordsStr;
-
     // Stable-ish age sorting:
     // Prefer a real timestamp if Worker provides one; otherwise fall back to idx order.
     const ts =
@@ -319,35 +369,58 @@ function renderSections(items) {
       (item && item.timestamp) ? Number(item.timestamp) :
       NaN;
 
-    if (Number.isFinite(ts)) section.dataset.ts = String(ts);
+    return {
+      id,
+      placeholder,
+      pageUrl,
+      imageUrl,
+      memeType,
+      memeLower,
+      titleRaw,
+      views,
+      showViews,
+      typeList,
+      mbtiTypes,
+      keywordsArr,
+      keywordsStr,
+      ts
+    };
+  }
+
+  // ---- Render ----
+
+  main.innerHTML = "";
+  const frag = document.createDocumentFragment();
+
+  items.forEach((item, idx) => {
+    const n = normalizeItem(item);
+
+    const section = document.createElement("section");
+    section.className = "content-section";
+
+    section.dataset.type = n.typeList;
+    section.dataset.meme = n.memeLower;
+    section.dataset.keywords = n.keywordsStr;
+
+    if (Number.isFinite(n.ts)) section.dataset.ts = String(n.ts);
     section.dataset.index = String(idx); // fallback: 0 = newest (server order)
+    section.dataset.views = String(Number.isFinite(n.views) ? n.views : 0);
 
-    const views = typeof item.views === "number" ? item.views : 0;
-    section.dataset.views = String(views);
+    const title = escapeHtml(n.titleRaw);
 
-    const titleRaw = item.title || item.id || "Untitled";
-    const title = escapeHtml(titleRaw);
-
-    const pageUrl = (item && item.page_url) ? String(item.page_url) : `https://imgflip.com/i/${item.id}`;
-    const imageUrl = (item && item.image_url)
-      ? String(item.image_url)
-      : (item && item.id ? `https://i.imgflip.com/${item.id}.jpg` : "");
-
-    // NOTE: We escape the title to prevent HTML injection. URLs are inserted as-is;
-    // if you want maximum hardening, switch these to setAttribute calls instead of innerHTML templates.
     section.innerHTML = `
       <div class="info-box">
         <div class="title-row">
           <h3>${title}</h3>
           <div class="meta-row" style="display:flex;align-items:center;justify-content:space-between;gap:8px;">
-            <span class="view-count">${views ? escapeHtml(numberWithCommas(views) + " views") : ""}</span>
+            <span class="view-count">${n.showViews ? escapeHtml(numberWithCommas(n.views) + " views") : ""}</span>
             <p class="image-links" style="display:flex;align-items:center;gap:8px;margin:0;">
-              <a href="${pageUrl}" target="_blank" rel="noopener" title="Open on Imgflip">
+              <a href="${n.pageUrl}" target="_blank" rel="noopener" title="Open on Imgflip">
                 <img src="images/imgflip.svg" alt="Imgflip link">
               </a>
               ${
-                memeLower
-                  ? `<a href="${FEED_BASE}/kym?name=${encodeURIComponent(memeType)}" target="_blank" rel="noopener" title="Open on Know Your Meme">
+                n.memeLower
+                  ? `<a href="${FEED_BASE}/kym?name=${encodeURIComponent(n.memeType)}" target="_blank" rel="noopener" title="Open on Know Your Meme">
                        <img src="images/Know_Your_Meme.svg" alt="Know Your Meme">
                      </a>`
                   : ""
@@ -358,7 +431,7 @@ function renderSections(items) {
         <div class="section-buttons"></div>
       </div>
       <div class="image-container">
-        <img src="${imageUrl}" alt="${title} Meme" loading="lazy">
+        <img src="${n.imageUrl}" alt="${title} Meme" loading="lazy">
       </div>
     `;
 
@@ -367,7 +440,7 @@ function renderSections(items) {
       const chipData = [];
 
       // MBTI type chips
-      typeList
+      n.typeList
         .split(/[\s,]+/)
         .map(t => t.trim())
         .filter(Boolean)
@@ -376,17 +449,17 @@ function renderSections(items) {
           chipData.push({ type: "type", value: T, label: displayType(T) });
         });
 
-      // Meme type chip
-      if (memeLower) {
+      // Meme type chip (skip for placeholder)
+      if (n.memeLower) {
         chipData.push({
           type: "meme",
-          value: memeLower,
-          label: memeType
+          value: n.memeLower,
+          label: n.memeType
         });
       }
 
-      // Keyword chips (no MBTI types here – they were removed above)
-      keywordsArr.forEach(kw => {
+      // Keyword chips (skip for placeholder by construction)
+      n.keywordsArr.forEach(kw => {
         chipData.push({
           type: "keywords",
           value: kw,
