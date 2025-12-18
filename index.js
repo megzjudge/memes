@@ -1,32 +1,168 @@
+// ============================
+// index.js (KV-config enabled)
+// ============================
+
+// ------------ Static defaults (safe fallback if /config fails) ------------
+
+const FEED_BASE = "https://rapid-math-6088.touch-97a.workers.dev";
+
+const DEFAULT_IMGFLIP_CONFIG = {
+  profile_url: "https://imgflip.com/user/mbtininja",
+  icons: [
+    { id: 1, file: "images/icon_1.svg", label: "0" },
+    { id: 2, file: "images/icon_2.svg", label: "250" },
+    { id: 3, file: "images/icon_3.svg", label: "500" },
+    { id: 4, file: "images/icon_4.svg", label: "1k" },
+    { id: 5, file: "images/icon_5.svg", label: "2k" },
+    { id: 6, file: "images/icon_6.svg", label: "3k" },
+    { id: 7, file: "images/icon_7.svg", label: "5k" },
+    { id: 8, file: "images/icon_8.svg", label: "7k" },
+    { id: 9, file: "images/icon_9.svg", label: "8k" },
+    { id: 10, file: "images/icon_10.svg", label: "10k" },
+    { id: 11, file: "images/icon_11.svg", label: "15k" },
+    { id: 12, file: "images/icon_12.svg", label: "20k" }, // current
+    { id: 13, file: "images/icon_13.svg", label: "30k" } // goal
+  ],
+  max_owned_icon_id: 12,
+  current_icon_id: 12
+};
+
+// ------------ Meme feed + filters + sort (static) ------------
+
+let sections = [];
+const currentFilters = {
+  type: "all",
+  meme: "all",
+  keywords: "all"
+};
+
+let sortState = {
+  mode: "age", // "age" | "views"
+  ageDirection: "newest" // "newest" | "oldest"
+};
+
+const MBTI_TYPES = [
+  "ESTP", "ISTP", "ESFP", "ISFP",
+  "ESTJ", "ISTJ", "ESFJ", "ISFJ",
+  "ENFP", "INFP", "ENFJ", "INFJ",
+  "ENTJ", "INTJ", "ENTP", "INTP"
+];
+const MBTI_SET = new Set(MBTI_TYPES);
+
+// ------------ Runtime config (fetched from Worker/KV) ------------
+
+let runtimeConfig = {
+  imgflip: { ...DEFAULT_IMGFLIP_CONFIG }
+};
+
+// ------------ Boot ------------
+
+document.addEventListener("DOMContentLoaded", () => {
+  console.log(
+    "Script loaded at",
+    new Date().toLocaleString("en-AU", { timeZone: "Australia/Sydney" })
+  );
+
+  bootstrap().catch(err => {
+    console.error("Bootstrap failed:", err);
+    showEmpty("No memes found.");
+  });
+});
+
+async function bootstrap() {
+  // 1) Fetch KV-backed config (best-effort, with safe fallback)
+  await loadRuntimeConfig();
+
+  // 2) Render icons using runtime config
+  setupImgflipIcons(runtimeConfig.imgflip);
+
+  // 3) Fetch and render feed
+  const items = await fetchFeed();
+  if (!items.length) {
+    showEmpty("No memes found.");
+    return;
+  }
+  renderSections(items);
+  initSortControls();
+  initFilters();
+}
+
+// ---------- KV-backed config ----------
+
+async function loadRuntimeConfig() {
+  const url = `${FEED_BASE}/config`;
+  try {
+    const json = await fetchJson(url, { timeoutMs: 8000 });
+
+    // Merge defensively to preserve defaults if fields are missing.
+    const imgflip = (json && typeof json === "object" && json.imgflip) ? json.imgflip : {};
+    runtimeConfig.imgflip = normalizeImgflipConfig(imgflip);
+
+    console.log("Loaded /config OK");
+  } catch (err) {
+    console.warn("Config fetch failed; using defaults:", err);
+    runtimeConfig.imgflip = { ...DEFAULT_IMGFLIP_CONFIG };
+  }
+}
+
+function normalizeImgflipConfig(cfg) {
+  const out = { ...DEFAULT_IMGFLIP_CONFIG };
+
+  if (cfg && typeof cfg === "object") {
+    if (typeof cfg.profile_url === "string" && cfg.profile_url.trim()) {
+      out.profile_url = cfg.profile_url.trim();
+    }
+
+    if (Array.isArray(cfg.icons) && cfg.icons.length) {
+      // Only keep well-formed icon objects
+      const cleaned = cfg.icons
+        .map(i => ({
+          id: Number(i && i.id),
+          file: String(i && i.file || "").trim(),
+          label: String(i && i.label || "").trim()
+        }))
+        .filter(i => Number.isFinite(i.id) && i.id > 0 && i.file && i.label);
+
+      if (cleaned.length) out.icons = cleaned;
+    }
+
+    if (Number.isFinite(Number(cfg.max_owned_icon_id))) {
+      out.max_owned_icon_id = Number(cfg.max_owned_icon_id);
+    }
+    if (Number.isFinite(Number(cfg.current_icon_id))) {
+      out.current_icon_id = Number(cfg.current_icon_id);
+    }
+  }
+
+  return out;
+}
+
 // ------------ Imgflip icons (top of page) ------------
 
-const IMGFLIP_PROFILE_URL = "https://imgflip.com/user/mbtininja";
-
-const IMGFLIP_ICONS = [
-  { id: 1,  file: "images/icon_1.svg",  label: "0" },
-  { id: 2,  file: "images/icon_2.svg",  label: "250" },
-  { id: 3,  file: "images/icon_3.svg",  label: "500" },
-  { id: 4,  file: "images/icon_4.svg",  label: "1k" },
-  { id: 5,  file: "images/icon_5.svg",  label: "2k" },
-  { id: 6,  file: "images/icon_6.svg",  label: "3k" },
-  { id: 7,  file: "images/icon_7.svg",  label: "5k" },
-  { id: 8,  file: "images/icon_8.svg",  label: "7k" },
-  { id: 9,  file: "images/icon_9.svg",  label: "8k" },
-  { id: 10, file: "images/icon_10.svg", label: "10k" },
-  { id: 11, file: "images/icon_11.svg", label: "15k" },
-  { id: 12, file: "images/icon_12.svg", label: "20k" }, // current
-  { id: 13, file: "images/icon_13.svg", label: "30k" }  // goal
-];
-
-// how many icons you currently own
-const IMGFLIP_MAX_OWNED_ICON_ID = 12;
-// which one is currently selected on Imgflip
-const IMGFLIP_CURRENT_ICON_ID = 12;
-
-function setupImgflipIcons() {
+function setupImgflipIcons(imgflipCfg) {
   const currentContainer = document.getElementById("current-imgflip-icon");
   const rowContainer = document.getElementById("imgflip-icon-row");
   if (!currentContainer && !rowContainer) return;
+
+  // Clear existing (in case bootstrap ever reruns)
+  if (currentContainer) currentContainer.innerHTML = "";
+  if (rowContainer) rowContainer.innerHTML = "";
+
+  const profileUrl = imgflipCfg && imgflipCfg.profile_url
+    ? imgflipCfg.profile_url
+    : DEFAULT_IMGFLIP_CONFIG.profile_url;
+
+  const icons = (imgflipCfg && Array.isArray(imgflipCfg.icons))
+    ? imgflipCfg.icons
+    : DEFAULT_IMGFLIP_CONFIG.icons;
+
+  const maxOwned = Number.isFinite(Number(imgflipCfg && imgflipCfg.max_owned_icon_id))
+    ? Number(imgflipCfg.max_owned_icon_id)
+    : DEFAULT_IMGFLIP_CONFIG.max_owned_icon_id;
+
+  const currentId = Number.isFinite(Number(imgflipCfg && imgflipCfg.current_icon_id))
+    ? Number(imgflipCfg.current_icon_id)
+    : DEFAULT_IMGFLIP_CONFIG.current_icon_id;
 
   // Prefix text: "Views icon:"
   if (rowContainer) {
@@ -36,9 +172,9 @@ function setupImgflipIcons() {
     rowContainer.appendChild(prefix);
   }
 
-  IMGFLIP_ICONS.forEach(icon => {
-    const owned = icon.id <= IMGFLIP_MAX_OWNED_ICON_ID;
-    const isCurrent = icon.id === IMGFLIP_CURRENT_ICON_ID;
+  icons.forEach(icon => {
+    const owned = icon.id <= maxOwned;
+    const isCurrent = icon.id === currentId;
 
     // Icons row under the header text
     if (rowContainer) {
@@ -56,7 +192,7 @@ function setupImgflipIcons() {
       }
 
       const link = document.createElement("a");
-      link.href = IMGFLIP_PROFILE_URL;
+      link.href = profileUrl;
       link.target = "_blank";
       link.rel = "noopener";
 
@@ -79,7 +215,7 @@ function setupImgflipIcons() {
     // The single current icon next to "@mbtininja"
     if (isCurrent && currentContainer) {
       const link = document.createElement("a");
-      link.href = IMGFLIP_PROFILE_URL;
+      link.href = profileUrl;
       link.target = "_blank";
       link.rel = "noopener";
 
@@ -93,67 +229,27 @@ function setupImgflipIcons() {
   });
 }
 
-// ------------ Meme feed + filters + sort ------------
-
-const FEED_BASE = "https://rapid-math-6088.touch-97a.workers.dev";
-
-let sections = [];
-const currentFilters = {
-  type: "all",
-  meme: "all",
-  keywords: "all"
-};
-
-let sortState = {
-  mode: "age",           // "age" | "views"
-  ageDirection: "newest" // "newest" | "oldest"
-};
-
-const MBTI_TYPES = [
-  "ESTP", "ISTP", "ESFP", "ISFP",
-  "ESTJ", "ISTJ", "ESFJ", "ISFJ",
-  "ENFP", "INFP", "ENFJ", "INFJ",
-  "ENTJ", "INTJ", "ENTP", "INTP"
-];
-const MBTI_SET = new Set(MBTI_TYPES);
-
-document.addEventListener("DOMContentLoaded", () => {
-  console.log(
-    "Script loaded at",
-    new Date().toLocaleString("en-AU", { timeZone: "Australia/Sydney" })
-  );
-
-  setupImgflipIcons();
-
-  bootstrap().catch(err => {
-    console.error("Bootstrap failed:", err);
-    showEmpty("No memes found.");
-  });
-});
-
-async function bootstrap() {
-  const items = await fetchFeed();
-  if (!items.length) {
-    showEmpty("No memes found.");
-    return;
-  }
-  renderSections(items);
-  initSortControls();
-  initFilters();
-}
-
 // ---------- fetch feed ----------
 
 async function fetchFeed() {
-  const url = `${FEED_BASE}/feed?fresh=1`;
+  // Allow forcing fresh from the page URL without editing the file:
+  // /index.html?fresh=1
+  const pageParams = new URLSearchParams(window.location.search);
+  const forceFresh = pageParams.get("fresh") === "1";
+
+  const url = forceFresh
+    ? `${FEED_BASE}/feed?fresh=1`
+    : `${FEED_BASE}/feed`;
+
   console.log("Fetching feed from", url);
   const t0 = performance.now();
-  const res = await fetch(url, { headers: { accept: "application/json" } });
-  if (!res.ok) {
-    throw new Error(`Feed HTTP ${res.status}`);
-  }
-  const json = await res.json();
-  const items = Array.isArray(json.items) ? json.items : [];
+
+  const json = await fetchJson(url, {
+    timeoutMs: 12000,
+    headers: { accept: "application/json" }
+  });
+
+  const items = Array.isArray(json && json.items) ? json.items : [];
   const t1 = performance.now();
   console.log(`Got ${items.length} items in ${Math.round(t1 - t0)}ms`);
   return items;
@@ -164,7 +260,7 @@ async function fetchFeed() {
 function showEmpty(msg) {
   const main = document.querySelector("main");
   if (!main) return;
-  main.innerHTML = `<div class="empty"><p>${msg}</p></div>`;
+  main.innerHTML = `<div class="empty"><p>${escapeHtml(msg)}</p></div>`;
 }
 
 function renderSections(items) {
@@ -199,9 +295,7 @@ function renderSections(items) {
       .filter(Boolean);
 
     // Remove anything that is actually an MBTI type
-    keywordsArr = keywordsArr.filter(
-      kw => !MBTI_SET.has(kw.toUpperCase())
-    );
+    keywordsArr = keywordsArr.filter(kw => !MBTI_SET.has(kw.toUpperCase()));
 
     // Ensure "memes" is always present as a keyword if any tag is "memes"/"Memes"
     const hasMemesTag = rawKeywords.some(
@@ -216,21 +310,37 @@ function renderSections(items) {
     section.dataset.type = typeList;
     section.dataset.meme = memeLower;
     section.dataset.keywords = keywordsStr;
-    section.dataset.index = String(idx); // 0 = newest
+
+    // Stable-ish age sorting:
+    // Prefer a real timestamp if Worker provides one; otherwise fall back to idx order.
+    const ts =
+      (item && item.created_at) ? Date.parse(item.created_at) :
+      (item && item.scraped_at) ? Date.parse(item.scraped_at) :
+      (item && item.timestamp) ? Number(item.timestamp) :
+      NaN;
+
+    if (Number.isFinite(ts)) section.dataset.ts = String(ts);
+    section.dataset.index = String(idx); // fallback: 0 = newest (server order)
+
     const views = typeof item.views === "number" ? item.views : 0;
     section.dataset.views = String(views);
 
-    const title = escapeHtml(item.title || item.id || "Untitled");
-    const pageUrl = item.page_url || `https://imgflip.com/i/${item.id}`;
-    const imageUrl =
-      item.image_url || (item.id ? `https://i.imgflip.com/${item.id}.jpg` : "");
+    const titleRaw = item.title || item.id || "Untitled";
+    const title = escapeHtml(titleRaw);
 
+    const pageUrl = (item && item.page_url) ? String(item.page_url) : `https://imgflip.com/i/${item.id}`;
+    const imageUrl = (item && item.image_url)
+      ? String(item.image_url)
+      : (item && item.id ? `https://i.imgflip.com/${item.id}.jpg` : "");
+
+    // NOTE: We escape the title to prevent HTML injection. URLs are inserted as-is;
+    // if you want maximum hardening, switch these to setAttribute calls instead of innerHTML templates.
     section.innerHTML = `
       <div class="info-box">
         <div class="title-row">
           <h3>${title}</h3>
           <div class="meta-row" style="display:flex;align-items:center;justify-content:space-between;gap:8px;">
-            <span class="view-count">${views ? numberWithCommas(views) + " views" : ""}</span>
+            <span class="view-count">${views ? escapeHtml(numberWithCommas(views) + " views") : ""}</span>
             <p class="image-links" style="display:flex;align-items:center;gap:8px;margin:0;">
               <a href="${pageUrl}" target="_blank" rel="noopener" title="Open on Imgflip">
                 <img src="images/imgflip.svg" alt="Imgflip link">
@@ -301,9 +411,7 @@ function renderSections(items) {
           btn.classList.add("chip-meme");
         }
 
-        btn.addEventListener("click", () =>
-          filterSections(d.type, d.value)
-        );
+        btn.addEventListener("click", () => filterSections(d.type, d.value));
         buttonsContainer.appendChild(btn);
       });
     }
@@ -382,6 +490,7 @@ function initSortControls() {
 function applySort() {
   const main = document.querySelector("main");
   if (!main) return;
+
   const nodes = Array.from(main.querySelectorAll(".content-section"));
   if (!nodes.length) return;
 
@@ -394,13 +503,23 @@ function applySort() {
       const vB = Number(b.dataset.views || 0);
       if (vB !== vA) return vB - vA; // high views first
       return idxA - idxB;
-    } else {
-      if (sortState.ageDirection === "newest") {
-        return idxA - idxB; // 0 = newest
-      } else {
-        return idxB - idxA;
-      }
     }
+
+    // mode === "age"
+    const tsA = Number(a.dataset.ts || NaN);
+    const tsB = Number(b.dataset.ts || NaN);
+
+    // Prefer timestamps when present; fall back to server order (idx).
+    if (Number.isFinite(tsA) && Number.isFinite(tsB)) {
+      return sortState.ageDirection === "newest"
+        ? (tsB - tsA) // larger ts = newer
+        : (tsA - tsB);
+    }
+
+    // Fallback: 0 = newest (server order)
+    return sortState.ageDirection === "newest"
+      ? (idxA - idxB)
+      : (idxB - idxA);
   });
 
   sorted.forEach(node => main.appendChild(node));
@@ -468,29 +587,13 @@ function initFilters() {
 
   MBTI_TYPES.forEach(t => typeOptions.add(t));
 
-  if (
-    sections.some(s =>
-      (s.dataset.type || "").toUpperCase().includes("NON-MBTI")
-    )
-  ) {
+  if (sections.some(s => (s.dataset.type || "").toUpperCase().includes("NON-MBTI"))) {
     typeOptions.add("NON-MBTI");
   }
 
-  buildFilterButtons(
-    typeButtonsContainer,
-    Array.from(typeOptions).sort(),
-    "type"
-  );
-  buildFilterButtons(
-    memeButtonsContainer,
-    Array.from(memeOptions).sort(),
-    "meme"
-  );
-  buildFilterButtons(
-    keywordButtonsContainer,
-    Array.from(keywordOptions).sort(),
-    "keywords"
-  );
+  buildFilterButtons(typeButtonsContainer, Array.from(typeOptions).sort(), "type");
+  buildFilterButtons(memeButtonsContainer, Array.from(memeOptions).sort(), "meme");
+  buildFilterButtons(keywordButtonsContainer, Array.from(keywordOptions).sort(), "keywords");
 }
 
 function buildFilterButtons(container, values, filterType) {
@@ -502,13 +605,12 @@ function buildFilterButtons(container, values, filterType) {
   allBtn.textContent = "All";
   allBtn.dataset.filterType = filterType;
   allBtn.dataset.value = "all";
-  allBtn.addEventListener("click", () =>
-    filterSections(filterType, "all")
-  );
+  allBtn.addEventListener("click", () => filterSections(filterType, "all"));
   container.appendChild(allBtn);
 
   values.forEach(val => {
     if (!val || typeof val !== "string") return;
+
     const btn = document.createElement("button");
     btn.dataset.filterType = filterType;
 
@@ -524,9 +626,7 @@ function buildFilterButtons(container, values, filterType) {
       btn.textContent = val;
     }
 
-    btn.addEventListener("click", () =>
-      filterSections(filterType, btn.dataset.value)
-    );
+    btn.addEventListener("click", () => filterSections(filterType, btn.dataset.value));
     container.appendChild(btn);
   });
 }
@@ -576,6 +676,7 @@ function filterSections(filterType, value) {
           .split(",")
           .map(k => k.trim())
           .filter(Boolean);
+
         if (fVal.includes(" ")) {
           matches = kws.some(kw => kw === fVal);
         } else {
@@ -592,23 +693,34 @@ function filterSections(filterType, value) {
 
 // ---------- helpers ----------
 
+async function fetchJson(url, opts = {}) {
+  const timeoutMs = Number.isFinite(opts.timeoutMs) ? opts.timeoutMs : 10000;
+  const headers = opts.headers && typeof opts.headers === "object" ? opts.headers : { accept: "application/json" };
+
+  const controller = new AbortController();
+  const t = setTimeout(() => controller.abort(), timeoutMs);
+
+  try {
+    const res = await fetch(url, {
+      headers,
+      signal: controller.signal
+    });
+
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    return await res.json();
+  } finally {
+    clearTimeout(t);
+  }
+}
+
+// Proper escaping (prevents HTML injection in innerHTML templates)
 function escapeHtml(s) {
-  return String(s).replace(/&(amp|lt|gt|quot|#39);/g, c => {
-    switch (c) {
-      case "&amp;":
-        return "&";
-      case "&lt;":
-        return "<";
-      case "&gt;":
-        return ">";
-      case "&quot;":
-        return '"';
-      case "&#39;":
-        return "'";
-      default:
-        return c;
-    }
-  });
+  return String(s)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
 }
 
 function numberWithCommas(x) {
