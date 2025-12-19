@@ -1,3 +1,10 @@
+// script.js
+// Single-file, client-side app:
+// - Renders Imgflip icons row
+// - Loads /memes.csv (static metadata) + /meme_daily_updates.csv (views)
+// - Provides filters + sorting
+// - Adds frequency-weighted font sizing + color weighting for Meme Type + Keywords filter buttons
+
 // ------------ Imgflip icons (top of page) ------------
 
 const IMGFLIP_PROFILE_URL = "https://imgflip.com/user/mbtininja";
@@ -212,13 +219,9 @@ function parseBool(v) {
 }
 
 function parseJsonArrayCell(v) {
-  // Your cells may be:
-  // - JSON arrays: ["memes","adhd"]
-  // - plain comma lists: memes, adhd
   let s = String(v ?? "").trim();
   if (!s) return [];
 
-  // strip outer quotes if they somehow remain after CSV parsing
   if (s.startsWith('"') && s.endsWith('"') && s.length >= 2) {
     s = s.slice(1, -1).trim();
   }
@@ -352,7 +355,6 @@ function renderSections(items) {
     section.dataset.meme = memeLower;
     section.dataset.keywords = keywordsStr;
 
-    // "age" sorting fallback is listing order (idx). No created_ts stored in CSV currently.
     section.dataset.index = String(idx);
 
     const views = typeof item.views === "number" ? item.views : 0;
@@ -511,7 +513,6 @@ function applySort() {
       return idxA - idxB;
     }
 
-    // Age sort: since we don't have created_ts in CSV, fallback to listing order
     return sortState.ageDirection === "newest" ? (idxA - idxB) : (idxB - idxA);
   });
 
@@ -548,7 +549,6 @@ function initFilters() {
 
   const typeOptions = new Set();
 
-  // counts for weighting font-size + color
   const memeCounts = new Map();    // meme_type -> count
   const keywordCounts = new Map(); // keyword -> count
 
@@ -620,7 +620,6 @@ function buildFilterButtons(container, values, filterType, countsMap) {
   allBtn.addEventListener("click", () => filterSections(filterType, "all"));
   container.appendChild(allBtn);
 
-  // If we have counts, compute min/max once for consistent scaling + coloring
   let minC = Infinity;
   let maxC = -Infinity;
   if (countsMap instanceof Map) {
@@ -651,7 +650,6 @@ function buildFilterButtons(container, values, filterType, countsMap) {
       btn.textContent = val;
     }
 
-    // Frequency-weighted font sizing + color (meme + keywords only)
     if (countsMap instanceof Map) {
       const count = countsMap.get(val) || 0;
 
@@ -659,6 +657,7 @@ function buildFilterButtons(container, values, filterType, countsMap) {
       btn.style.fontSize = `${size}rem`;
       btn.title = `${btn.textContent} (${count})`;
 
+      // CHANGED: base color is now the SMALLEST color; higher frequency => darker
       const { bg, border } = colorForCountFromMinMax(count, minC, maxC);
       btn.style.backgroundColor = bg;
       btn.style.borderColor = border;
@@ -764,7 +763,6 @@ function displayType(upper) {
 
 // ---- sizing + color weighting helpers ----
 
-// scales font size based on frequency with a log curve (stable across huge ranges)
 function scaleFontSizeFromMinMax(count, minC, maxC) {
   const MIN = 0.80; // rem
   const MAX = 1.15; // rem
@@ -780,10 +778,9 @@ function scaleFontSizeFromMinMax(count, minC, maxC) {
   return MIN + clamp01(t) * (MAX - MIN);
 }
 
-// Color mapping:
-// Base (mid) color is #5e3b83
-// - least used => lighter
-// - most used  => darker
+// CHANGED mapping:
+// - count == min => BASE (#5e3b83)
+// - count increases => darker
 function colorForCountFromMinMax(count, minC, maxC) {
   const BASE = "#5e3b83";
 
@@ -796,15 +793,14 @@ function colorForCountFromMinMax(count, minC, maxC) {
   const t = (Math.log(count + 1) - logMin) / (logMax - logMin); // 0..1
   const x = clamp01(t);
 
-  // x=0 => lighter, x=1 => darker
-  const shade = 0.35 - 0.55 * x; // +0.35 (light) down to ~ -0.20 (dark)
+  // x=0 => BASE, x=1 => darker
+  const shade = -0.50 * x; // 0 down to -0.50
 
   const bg = shadeColor(BASE, shade);
   const border = shadeColor(BASE, shade - 0.18);
   return { bg, border };
 }
 
-// Mix color toward white (t > 0) or black (t < 0), t in [-1..+1]
 function shadeColor(hex, t) {
   const { r, g, b } = hexToRgb(hex);
   const tt = clamp(t, -1, 1);
