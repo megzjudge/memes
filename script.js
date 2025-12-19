@@ -224,6 +224,9 @@ function renderSections(items) {
       ? String(item.image_url)
       : (item && item.id ? `https://i.imgflip.com/${item.id}.jpg` : "");
 
+    const kymUrlRaw = (item && item.kym_url) ? String(item.kym_url).trim() : "";
+    const hasKymUrl = !!kymUrlRaw;
+
     section.innerHTML = `
       <div class="info-box">
         <div class="title-row">
@@ -235,10 +238,10 @@ function renderSections(items) {
                 <img src="images/imgflip.svg" alt="Imgflip link">
               </a>
               ${
-                memeLower
-                  ? `<a href="${FEED_BASE}/kym?name=${encodeURIComponent(memeType)}" target="_blank" rel="noopener" title="Open on Know Your Meme">
-                       <img src="images/Know_Your_Meme.svg" alt="Know Your Meme">
-                     </a>`
+                hasKymUrl
+                  ? `<a href="${FEED_BASE}/kym?url=${encodeURIComponent(kymUrlRaw)}&name=${encodeURIComponent(memeType)}" target="_blank" rel="noopener" title="Open on Know Your Meme">
+                      <img src="images/Know_Your_Meme.svg" alt="Know Your Meme">
+                    </a>`
                   : ""
               }
             </p>

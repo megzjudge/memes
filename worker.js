@@ -379,7 +379,7 @@ function parseFromJson(obj, id, pageUrl) {
     }
   }
   item.meme_type = memeType ? toTitleCase(memeType) : "";
-  item.kym_slug = item.meme_type ? slugifyForKym(item.meme_type) : null;
+  item.kym_url = obj.kym_url ? String(obj.kym_url).trim() : "";
 
   // Split mbti_types vs keywords
   const mbti = [];
@@ -406,19 +406,21 @@ function parseFromJson(obj, id, pageUrl) {
 // =========================================================
 
 async function handleKym(url) {
-  const name = url.searchParams.get("name") || "";
-  const explicit = url.searchParams.get("slug") || "";
-  const label = name || explicit;
-  const slug = explicit ? slugifyForKym(explicit) : slugifyForKym(name);
+  const kymUrl = (url.searchParams.get("url") || "").trim();
+  const name = (url.searchParams.get("name") || "").trim();
 
-  if (slug) {
-    const target = `https://knowyourmeme.com/memes/${slug}`;
-    if (await urlExists(target)) return redirect(target);
+  if (kymUrl) {
+    try {
+      const u = new URL(kymUrl);
+      if (u.hostname === "knowyourmeme.com" || u.hostname.endsWith(".knowyourmeme.com")) {
+        return redirect(u.toString());
+      }
+    } catch {
+    }
   }
 
   return redirect(
-    "https://knowyourmeme.com/search?context=&sort=&q=" +
-      encodeURIComponent(label)
+    "https://knowyourmeme.com/search?context=&sort=&q=" + encodeURIComponent(name)
   );
 }
 
@@ -538,7 +540,7 @@ function minimalStaticFromId(id) {
     mbti_types: [],
     keywords: [],
     tags: [],
-    kym_slug: null,
+    kym_url: "",
 
     // static time fields
     created_at: "",
