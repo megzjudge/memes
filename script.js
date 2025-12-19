@@ -479,7 +479,15 @@ function initFilters() {
     typeOptions.add("ANY-MBTI");
   }
 
-  buildFilterButtons(typeButtonsContainer, Array.from(typeOptions).sort(), "type");
+  // Order type filters: Any MBTI -> 16 types -> Non-MBTI (if present)
+  const typeValues = Array.from(typeOptions);
+  const orderedTypeValues = [
+    ...(typeValues.includes("ANY-MBTI") ? ["ANY-MBTI"] : []),
+    ...MBTI_TYPES,
+    ...(typeValues.includes("NON-MBTI") ? ["NON-MBTI"] : [])
+  ];
+
+  buildFilterButtons(typeButtonsContainer, orderedTypeValues, "type");
   buildFilterButtons(memeButtonsContainer, Array.from(memeOptions).sort(), "meme");
   buildFilterButtons(keywordButtonsContainer, Array.from(keywordOptions).sort(), "keywords");
 }
