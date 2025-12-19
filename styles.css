@@ -99,7 +99,7 @@ header p {
 
 #sort-buttons button {
   padding: 0.35rem 0.75rem;
-  font-size: 0.9rem;      /* same font size as other chips */
+  font-size: 0.9rem;
   border-radius: 999px;
   border: 1px solid #ccc;
   cursor: pointer;
@@ -295,8 +295,8 @@ a {
 }
 
 .section-buttons button[data-filter-type="meme"] {
-    background-color: #372154;
-    border-color: #372154;
+    background-color: #7847B8;
+    border-color: #7847B8;
     color: #e0d7f7;
 }
 
@@ -320,7 +320,7 @@ a {
 .image-container {
     max-width: 100%;
     overflow: hidden;
-    padding: 1rem 0; /* Added symmetric padding for better spacing under the text/image */
+    padding: 1rem 0;
 }
 
 .image-container img {
