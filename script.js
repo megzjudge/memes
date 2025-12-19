@@ -1,23 +1,28 @@
 // script.js
+// Single-file, client-side app:
+// - Renders Imgflip icons row
+// - Loads /memes.csv (static metadata) + /meme_daily_updates.csv (views)
+// - Provides filters + sorting
+// - Adds frequency-weighted font sizing for Meme Type + Keywords filter buttons
 
 // ------------ Imgflip icons (top of page) ------------
 
 const IMGFLIP_PROFILE_URL = "https://imgflip.com/user/mbtininja";
 
 const IMGFLIP_ICONS = [
-  { id: 1,  file: "images/icon_1.svg",  label: "0" },
-  { id: 2,  file: "images/icon_2.svg",  label: "250" },
-  { id: 3,  file: "images/icon_3.svg",  label: "500" },
-  { id: 4,  file: "images/icon_4.svg",  label: "1k" },
-  { id: 5,  file: "images/icon_5.svg",  label: "2k" },
-  { id: 6,  file: "images/icon_6.svg",  label: "3k" },
-  { id: 7,  file: "images/icon_7.svg",  label: "5k" },
-  { id: 8,  file: "images/icon_8.svg",  label: "7k" },
-  { id: 9,  file: "images/icon_9.svg",  label: "8k" },
+  { id: 1, file: "images/icon_1.svg", label: "0" },
+  { id: 2, file: "images/icon_2.svg", label: "250" },
+  { id: 3, file: "images/icon_3.svg", label: "500" },
+  { id: 4, file: "images/icon_4.svg", label: "1k" },
+  { id: 5, file: "images/icon_5.svg", label: "2k" },
+  { id: 6, file: "images/icon_6.svg", label: "3k" },
+  { id: 7, file: "images/icon_7.svg", label: "5k" },
+  { id: 8, file: "images/icon_8.svg", label: "7k" },
+  { id: 9, file: "images/icon_9.svg", label: "8k" },
   { id: 10, file: "images/icon_10.svg", label: "10k" },
   { id: 11, file: "images/icon_11.svg", label: "15k" },
   { id: 12, file: "images/icon_12.svg", label: "20k" }, // current
-  { id: 13, file: "images/icon_13.svg", label: "30k" }  // goal
+  { id: 13, file: "images/icon_13.svg", label: "30k" } // goal
 ];
 
 const IMGFLIP_MAX_OWNED_ICON_ID = 12;
@@ -85,22 +90,22 @@ function setupImgflipIcons() {
 
 // ------------ Meme feed + filters + sort ------------
 
-const STATIC_FILE = "/memes.csv";               // CSV 10 columns
-const DAILY_FILE  = "/meme_daily_updates.csv";  // CSV 3 columns: id,url,views
+const STATIC_FILE = "/memes.csv"; // CSV 10 columns
+const DAILY_FILE = "/meme_daily_updates.csv"; // CSV 3 columns: id, urls, views
 
 let sections = [];
 const currentFilters = { type: "all", meme: "all", keywords: "all" };
 
 let sortState = {
-  mode: "age",           // "age" | "views"
+  mode: "age", // "age" | "views"
   ageDirection: "newest" // "newest" | "oldest"
 };
 
 const MBTI_TYPES = [
-  "ESTP","ISTP","ESFP","ISFP",
-  "ESTJ","ISTJ","ESFJ","ISFJ",
-  "ENFP","INFP","ENFJ","INFJ",
-  "ENTJ","INTJ","ENTP","INTP"
+  "ESTP", "ISTP", "ESFP", "ISFP",
+  "ESTJ", "ISTJ", "ESFJ", "ISFJ",
+  "ENFP", "INFP", "ENFJ", "INFJ",
+  "ENTJ", "INTJ", "ENTP", "INTP"
 ];
 const MBTI_SET = new Set(MBTI_TYPES);
 
@@ -140,17 +145,13 @@ async function fetchFeed() {
   const staticRows = parseCsv(staticText, ","); // headers required
   const dailyRows = parseCsv(dailyText, ",");
 
-  console.log("STATIC HEADERS:", staticRows[0] ? Object.keys(staticRows[0]) : "no rows");
-  console.log("STATIC SAMPLE ROW:", staticRows[0]);
-  console.log("DAILY HEADERS:", dailyRows[0] ? Object.keys(dailyRows[0]) : "no rows");
-  console.log("DAILY SAMPLE ROW:", dailyRows[0]);
-
+  // Views map: id -> views
   const dailyMap = new Map();
   for (const r of dailyRows) {
     const id = String(r.id || r.meme_id || r.image_id || "").trim();
     if (!id) continue;
 
-    const viewsNum = Number(String(r.views ?? "").trim());
+    const viewsNum = Number(String(r.views ?? "").replace(/,/g, "").trim());
     dailyMap.set(id, Number.isFinite(viewsNum) ? viewsNum : 0);
   }
 
@@ -179,13 +180,13 @@ async function fetchTextOrThrow(path) {
 }
 
 function csvRowToMemeItem(r) {
-  // memes.csv columns:
-  // id,url,image_url,is_gif,title,meme_type,kym_slug,mbti_types,keywords,tags
+  // memes.csv headers (yours are uppercase but parser lowercases them):
+  // id, urls, image_url, is_gif, title, meme_type, kym_slug, mbti_types, keywords, tags
 
   const id = String(r.id || r.meme_id || r.image_id || "").trim();
   if (!id) return null;
 
-  const page_url = String(r.url || r.urls || "").trim() || `https://imgflip.com/i/${id}`;
+  const page_url = String(r.urls || r.url || "").trim() || `https://imgflip.com/i/${id}`;
   const image_url = String(r.image_url || "").trim() || `https://i.imgflip.com/${id}.jpg`;
 
   const is_gif = parseBool(r.is_gif);
@@ -218,10 +219,13 @@ function parseBool(v) {
 }
 
 function parseJsonArrayCell(v) {
+  // Your cells may be:
+  // - JSON arrays: ["memes","adhd"]
+  // - plain comma lists: memes, adhd
   let s = String(v ?? "").trim();
   if (!s) return [];
 
-  // Defensive: strip outer quotes if they somehow remain
+  // strip outer quotes if they somehow remain after CSV parsing
   if (s.startsWith('"') && s.endsWith('"') && s.length >= 2) {
     s = s.slice(1, -1).trim();
   }
@@ -333,8 +337,8 @@ function renderSections(items) {
     const rawKeywords = Array.isArray(item.keywords)
       ? item.keywords
       : Array.isArray(item.tags)
-      ? item.tags
-      : [];
+        ? item.tags
+        : [];
 
     let keywordsArr = rawKeywords
       .map(k => String(k).toLowerCase().trim())
@@ -367,16 +371,14 @@ function renderSections(items) {
     const pageUrl = item.page_url ? String(item.page_url) : `https://imgflip.com/i/${item.id}`;
     const imageUrl = item.image_url ? String(item.image_url) : (item.id ? `https://i.imgflip.com/${item.id}.jpg` : "");
 
+    const viewLabel = views > 0 ? `${numberWithCommas(views)} views` : "Views pending";
+
     section.innerHTML = `
       <div class="info-box">
         <div class="title-row">
           <h3>${title}</h3>
           <div class="meta-row" style="display:flex;align-items:center;justify-content:space-between;gap:8px;">
-            <span class="view-count">${
-              Number.isFinite(views) && views > 0
-                ? escapeHtml(numberWithCommas(views) + " views")
-                : "Views pending"
-            }</span>
+            <span class="view-count">${escapeHtml(viewLabel)}</span>
             <p class="image-links" style="display:flex;align-items:center;gap:8px;margin:0;">
               <a href="${pageUrl}" target="_blank" rel="noopener" title="Open on Imgflip">
                 <img src="images/imgflip.svg" alt="Imgflip link">
@@ -542,7 +544,7 @@ function updateSortButtonsUI() {
   }
 }
 
-// ---------- filters ----------
+// ---------- filters (with frequency-weighted sizing) ----------
 
 function initFilters() {
   sections = Array.from(document.querySelectorAll(".content-section"));
@@ -552,8 +554,10 @@ function initFilters() {
   const keywordButtonsContainer = document.getElementById("keywords-buttons");
 
   const typeOptions = new Set();
-  const memeOptions = new Set();
-  const keywordOptions = new Set();
+
+  // NEW: counts for weighting font-size
+  const memeCounts = new Map();    // meme_type -> count
+  const keywordCounts = new Map(); // keyword -> count
 
   sections.forEach(section => {
     const typeStr = (section.dataset.type || "").trim();
@@ -566,7 +570,7 @@ function initFilters() {
     }
 
     const memeStr = (section.dataset.meme || "").toLowerCase().trim();
-    if (memeStr) memeOptions.add(memeStr);
+    if (memeStr) memeCounts.set(memeStr, (memeCounts.get(memeStr) || 0) + 1);
 
     const kwStr = (section.dataset.keywords || "").toLowerCase().trim();
     if (kwStr) {
@@ -577,7 +581,7 @@ function initFilters() {
         .forEach(k => {
           const upper = k.toUpperCase();
           if (MBTI_SET.has(upper)) return;
-          keywordOptions.add(k);
+          keywordCounts.set(k, (keywordCounts.get(k) || 0) + 1);
         });
     }
   });
@@ -599,6 +603,7 @@ function initFilters() {
     typeOptions.add("ANY-MBTI");
   }
 
+  // Order type filters: Any MBTI -> 16 types -> Non-MBTI (if present)
   const typeValues = Array.from(typeOptions);
   const orderedTypeValues = [
     ...(typeValues.includes("ANY-MBTI") ? ["ANY-MBTI"] : []),
@@ -607,11 +612,11 @@ function initFilters() {
   ];
 
   buildFilterButtons(typeButtonsContainer, orderedTypeValues, "type");
-  buildFilterButtons(memeButtonsContainer, Array.from(memeOptions).sort(), "meme");
-  buildFilterButtons(keywordButtonsContainer, Array.from(keywordOptions).sort(), "keywords");
+  buildFilterButtons(memeButtonsContainer, Array.from(memeCounts.keys()).sort(), "meme", memeCounts);
+  buildFilterButtons(keywordButtonsContainer, Array.from(keywordCounts.keys()).sort(), "keywords", keywordCounts);
 }
 
-function buildFilterButtons(container, values, filterType) {
+function buildFilterButtons(container, values, filterType, countsMap) {
   if (!container) return;
 
   container.innerHTML = "";
@@ -638,6 +643,14 @@ function buildFilterButtons(container, values, filterType) {
     } else {
       btn.dataset.value = val;
       btn.textContent = val;
+    }
+
+    // NEW: frequency-weighted font sizing (meme + keywords only)
+    if (countsMap instanceof Map) {
+      const count = countsMap.get(val) || 0;
+      const size = scaleFontSize(count, countsMap);
+      btn.style.fontSize = `${size}rem`;
+      btn.title = `${btn.textContent} (${count})`;
     }
 
     btn.addEventListener("click", () => filterSections(filterType, btn.dataset.value));
@@ -736,4 +749,27 @@ function displayType(upper) {
   if (upper === "NON-MBTI") return "Non-MBTI";
   if (upper === "ANY-MBTI") return "Any MBTI";
   return upper;
+}
+
+// NEW: scales font size based on frequency with a log curve
+function scaleFontSize(count, countsMap) {
+  const MIN = 0.80; // rem
+  const MAX = 1.15; // rem
+
+  let minC = Infinity;
+  let maxC = -Infinity;
+  for (const v of countsMap.values()) {
+    if (v < minC) minC = v;
+    if (v > maxC) maxC = v;
+  }
+
+  if (!Number.isFinite(minC) || !Number.isFinite(maxC) || minC === maxC) {
+    return (MIN + MAX) / 2;
+  }
+
+  const logMin = Math.log(minC + 1);
+  const logMax = Math.log(maxC + 1);
+  const t = (Math.log(count + 1) - logMin) / (logMax - logMin);
+
+  return MIN + t * (MAX - MIN);
 }
