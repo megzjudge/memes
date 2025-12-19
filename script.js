@@ -1,26 +1,23 @@
 // script.js
-// ---------------------------------------------------------
-// Static UI + rendering/filter/sort logic (front-end bundle)
-// ---------------------------------------------------------
 
 // ------------ Imgflip icons (top of page) ------------
 
 const IMGFLIP_PROFILE_URL = "https://imgflip.com/user/mbtininja";
 
 const IMGFLIP_ICONS = [
-  { id: 1, file: "images/icon_1.svg", label: "0" },
-  { id: 2, file: "images/icon_2.svg", label: "250" },
-  { id: 3, file: "images/icon_3.svg", label: "500" },
-  { id: 4, file: "images/icon_4.svg", label: "1k" },
-  { id: 5, file: "images/icon_5.svg", label: "2k" },
-  { id: 6, file: "images/icon_6.svg", label: "3k" },
-  { id: 7, file: "images/icon_7.svg", label: "5k" },
-  { id: 8, file: "images/icon_8.svg", label: "7k" },
-  { id: 9, file: "images/icon_9.svg", label: "8k" },
+  { id: 1,  file: "images/icon_1.svg",  label: "0" },
+  { id: 2,  file: "images/icon_2.svg",  label: "250" },
+  { id: 3,  file: "images/icon_3.svg",  label: "500" },
+  { id: 4,  file: "images/icon_4.svg",  label: "1k" },
+  { id: 5,  file: "images/icon_5.svg",  label: "2k" },
+  { id: 6,  file: "images/icon_6.svg",  label: "3k" },
+  { id: 7,  file: "images/icon_7.svg",  label: "5k" },
+  { id: 8,  file: "images/icon_8.svg",  label: "7k" },
+  { id: 9,  file: "images/icon_9.svg",  label: "8k" },
   { id: 10, file: "images/icon_10.svg", label: "10k" },
   { id: 11, file: "images/icon_11.svg", label: "15k" },
   { id: 12, file: "images/icon_12.svg", label: "20k" }, // current
-  { id: 13, file: "images/icon_13.svg", label: "30k" } // goal
+  { id: 13, file: "images/icon_13.svg", label: "30k" }  // goal
 ];
 
 // how many icons you currently own
@@ -33,7 +30,6 @@ function setupImgflipIcons() {
   const rowContainer = document.getElementById("imgflip-icon-row");
   if (!currentContainer && !rowContainer) return;
 
-  // Prefix text: "Views icon:"
   if (rowContainer) {
     const prefix = document.createElement("span");
     prefix.classList.add("imgflip-icon-prefix");
@@ -45,20 +41,13 @@ function setupImgflipIcons() {
     const owned = icon.id <= IMGFLIP_MAX_OWNED_ICON_ID;
     const isCurrent = icon.id === IMGFLIP_CURRENT_ICON_ID;
 
-    // Icons row under the header text
     if (rowContainer) {
       const wrapper = document.createElement("div");
       wrapper.classList.add("imgflip-icon");
 
-      // owned but NOT current → strike
-      if (owned && !isCurrent) {
-        wrapper.classList.add("owned");
-      } else if (!owned) {
-        wrapper.classList.add("locked");
-      }
-      if (isCurrent) {
-        wrapper.classList.add("current");
-      }
+      if (owned && !isCurrent) wrapper.classList.add("owned");
+      else if (!owned) wrapper.classList.add("locked");
+      if (isCurrent) wrapper.classList.add("current");
 
       const link = document.createElement("a");
       link.href = IMGFLIP_PROFILE_URL;
@@ -72,7 +61,6 @@ function setupImgflipIcons() {
 
       wrapper.appendChild(link);
 
-      // numeric label only (no "icon" word)
       const label = document.createElement("span");
       label.classList.add("imgflip-icon-label");
       label.textContent = icon.label;
@@ -81,7 +69,6 @@ function setupImgflipIcons() {
       rowContainer.appendChild(wrapper);
     }
 
-    // The single current icon next to "@mbtininja"
     if (isCurrent && currentContainer) {
       const link = document.createElement("a");
       link.href = IMGFLIP_PROFILE_URL;
@@ -110,7 +97,7 @@ const currentFilters = {
 };
 
 let sortState = {
-  mode: "age", // "age" | "views"
+  mode: "age",           // "age" | "views"
   ageDirection: "newest" // "newest" | "oldest"
 };
 
@@ -121,12 +108,6 @@ const MBTI_TYPES = [
   "ENTJ", "INTJ", "ENTP", "INTP"
 ];
 const MBTI_SET = new Set(MBTI_TYPES);
-
-// Front-end fallback exclusions for “meme_type” inference (only used if Worker left meme_type blank)
-const MEME_TYPE_EXCLUDE = new Set([
-  "mbti", "myers briggs", "myers-briggs", "personality",
-  "meme", "memes", "fun", "fun stream", "psychology"
-]);
 
 document.addEventListener("DOMContentLoaded", () => {
   console.log(
@@ -156,7 +137,7 @@ async function bootstrap() {
 // ---------- fetch feed ----------
 
 async function fetchFeed() {
-  const url = `${FEED_BASE}/feed?fresh=1`;
+  const url = `${FEED_BASE}/feed`;
   console.log("Fetching feed from", url);
   const t0 = performance.now();
   const res = await fetch(url, { headers: { accept: "application/json" } });
@@ -173,106 +154,7 @@ async function fetchFeed() {
 function showEmpty(msg) {
   const main = document.querySelector("main");
   if (!main) return;
-  main.innerHTML = `<div class="empty"><p>${escapeHtml(msg)}</p></div>`;
-}
-
-// Front-end “fill” logic if KV/Worker provides null/empty values.
-// This does NOT invent facts; it derives from what is already present (id/page_url/image_url/tags).
-function normalizeItem(raw) {
-  const item = raw && typeof raw === "object" ? raw : {};
-
-  const id = String(item.id || "").trim();
-  const page_url = item.page_url ? String(item.page_url) : (id ? `https://imgflip.com/i/${id}` : "");
-  const image_url = item.image_url ? String(item.image_url) : (id ? `https://i.imgflip.com/${id}.jpg` : "");
-
-  const is_gif = Boolean(item.is_gif) || image_url.toLowerCase().endsWith(".gif");
-
-  const title =
-    (item.title && String(item.title).trim() && String(item.title).trim() !== id)
-      ? String(item.title).trim()
-      : (id || "Untitled");
-
-  const views = typeof item.views === "number" && Number.isFinite(item.views) ? item.views : 0;
-
-  // tags as lowercase strings
-  const tags = Array.isArray(item.tags)
-    ? item.tags.map(t => String(t).toLowerCase().trim()).filter(Boolean)
-    : [];
-
-  // MBTI types: prefer worker value; else derive from tags
-  let mbti_types = Array.isArray(item.mbti_types)
-    ? item.mbti_types.map(t => String(t).toUpperCase().trim()).filter(Boolean)
-    : [];
-  if (!mbti_types.length && tags.length) {
-    mbti_types = tags
-      .map(t => t.toUpperCase())
-      .filter(t => MBTI_SET.has(t));
-  }
-  mbti_types = Array.from(new Set(mbti_types));
-
-  // meme_type: prefer worker value; else derive from tags (first non-excluded, non-MBTI tag)
-  let meme_type = item.meme_type ? String(item.meme_type).trim() : "";
-  if (!meme_type && tags.length) {
-    const candidate = tags.find(t => {
-      const upper = t.toUpperCase();
-      if (MBTI_SET.has(upper)) return false;
-      if (MEME_TYPE_EXCLUDE.has(t)) return false;
-      return true;
-    });
-    meme_type = candidate ? toTitleCase(candidate) : "";
-  }
-
-  const memeLower = meme_type.toLowerCase();
-
-  // keywords: prefer worker value; else derive from tags excluding MBTI + excluding meme_type tag itself
-  let keywords = Array.isArray(item.keywords)
-    ? item.keywords.map(k => String(k).toLowerCase().trim()).filter(Boolean)
-    : [];
-  if (!keywords.length && tags.length) {
-    keywords = tags.filter(t => {
-      const upper = t.toUpperCase();
-      if (MBTI_SET.has(upper)) return false;
-      if (memeLower && t === memeLower) return false;
-      return true;
-    });
-  }
-
-  // ensure "memes" present if tags includes memes
-  if (tags.some(t => t === "memes") && !keywords.includes("memes")) {
-    keywords.push("memes");
-  }
-  keywords = Array.from(new Set(keywords));
-
-  const age_text = item.age_text ? String(item.age_text) : "";
-
-  // kym_slug: prefer worker; else derive from meme_type
-  const kym_slug = (item.kym_slug !== null && item.kym_slug !== undefined)
-    ? String(item.kym_slug)
-    : (meme_type ? slugifyForKym(meme_type) : null);
-
-  // Optional timestamps (if worker provides)
-  const created_at = item.created_at ? String(item.created_at) : "";
-  const scraped_at = item.scraped_at ? String(item.scraped_at) : "";
-  const timestamp = item.timestamp;
-
-  return {
-    ...item,
-    id,
-    page_url,
-    image_url,
-    is_gif,
-    title,
-    views,
-    tags,
-    mbti_types,
-    meme_type,
-    keywords,
-    age_text,
-    kym_slug,
-    created_at,
-    scraped_at,
-    timestamp
-  };
+  main.innerHTML = `<div class="empty"><p>${msg}</p></div>`;
 }
 
 function renderSections(items) {
@@ -282,9 +164,7 @@ function renderSections(items) {
   main.innerHTML = "";
   const frag = document.createDocumentFragment();
 
-  items.forEach((rawItem, idx) => {
-    const item = normalizeItem(rawItem);
-
+  items.forEach((item, idx) => {
     const section = document.createElement("section");
     section.className = "content-section";
 
@@ -293,7 +173,8 @@ function renderSections(items) {
       : [];
     const typeList = mbtiTypes.length ? mbtiTypes.join(", ") : "NON-MBTI";
 
-    const memeType = String(item.meme_type || "");
+    const rawMemeType = item.meme_type || item.meme_tag || "";
+    const memeType = String(rawMemeType);
     const memeLower = memeType.toLowerCase();
 
     const rawKeywords = Array.isArray(item.keywords)
@@ -306,11 +187,11 @@ function renderSections(items) {
       .map(k => String(k).toLowerCase().trim())
       .filter(Boolean);
 
-    // Remove anything that is actually an MBTI type
     keywordsArr = keywordsArr.filter(kw => !MBTI_SET.has(kw.toUpperCase()));
 
-    // Ensure "memes" is always present as a keyword if any tag is "memes"/"Memes"
-    const hasMemesTag = Array.isArray(item.tags) && item.tags.some(t => String(t).toLowerCase().trim() === "memes");
+    const hasMemesTag = rawKeywords.some(
+      k => String(k).toLowerCase().trim() === "memes"
+    );
     if (hasMemesTag && !keywordsArr.includes("memes")) {
       keywordsArr.push("memes");
     }
@@ -322,15 +203,12 @@ function renderSections(items) {
     section.dataset.keywords = keywordsStr;
 
     // Stable-ish age sorting:
-    // Prefer a real timestamp if Worker provides one; otherwise fall back to idx order.
-    const ts =
-      (item && item.created_at) ? Date.parse(item.created_at) :
-      (item && item.scraped_at) ? Date.parse(item.scraped_at) :
-      (item && typeof item.timestamp === "number") ? Number(item.timestamp) :
-      NaN;
-
-    if (Number.isFinite(ts)) section.dataset.ts = String(ts);
-    section.dataset.index = String(idx); // fallback: 0 = newest (server order)
+    // Worker now provides created_ts when available (best), otherwise we fall back to idx.
+    const ts = Number(item && item.created_ts);
+    if (Number.isFinite(ts) && ts > 0) {
+      section.dataset.ts = String(ts);
+    }
+    section.dataset.index = String(idx); // fallback
 
     const views = typeof item.views === "number" ? item.views : 0;
     section.dataset.views = String(views);
@@ -338,8 +216,13 @@ function renderSections(items) {
     const titleRaw = item.title || item.id || "Untitled";
     const title = escapeHtml(titleRaw);
 
-    const pageUrl = item.page_url || (item.id ? `https://imgflip.com/i/${item.id}` : "");
-    const imageUrl = item.image_url || (item.id ? `https://i.imgflip.com/${item.id}.jpg` : "");
+    const pageUrl = (item && item.page_url)
+      ? String(item.page_url)
+      : `https://imgflip.com/i/${item.id}`;
+
+    const imageUrl = (item && item.image_url)
+      ? String(item.image_url)
+      : (item && item.id ? `https://i.imgflip.com/${item.id}.jpg` : "");
 
     section.innerHTML = `
       <div class="info-box">
@@ -372,7 +255,6 @@ function renderSections(items) {
     if (buttonsContainer) {
       const chipData = [];
 
-      // MBTI type chips
       typeList
         .split(/[\s,]+/)
         .map(t => t.trim())
@@ -382,7 +264,6 @@ function renderSections(items) {
           chipData.push({ type: "type", value: T, label: displayType(T) });
         });
 
-      // Meme type chip
       if (memeLower) {
         chipData.push({
           type: "meme",
@@ -391,7 +272,6 @@ function renderSections(items) {
         });
       }
 
-      // Keyword chips (no MBTI types here – they were removed above)
       keywordsArr.forEach(kw => {
         chipData.push({
           type: "keywords",
@@ -411,11 +291,8 @@ function renderSections(items) {
         btn.dataset.filterType = d.type;
         btn.dataset.value = d.value;
 
-        if (d.type === "type") {
-          btn.classList.add("chip-type");
-        } else if (d.type === "meme") {
-          btn.classList.add("chip-meme");
-        }
+        if (d.type === "type") btn.classList.add("chip-type");
+        else if (d.type === "meme") btn.classList.add("chip-meme");
 
         btn.addEventListener("click", () => filterSections(d.type, d.value));
         buttonsContainer.appendChild(btn);
@@ -445,11 +322,8 @@ function initSortControls() {
     `;
 
     const firstRow = filterContainer.querySelector(".filter-row");
-    if (firstRow) {
-      filterContainer.insertBefore(sortRow, firstRow);
-    } else {
-      filterContainer.appendChild(sortRow);
-    }
+    if (firstRow) filterContainer.insertBefore(sortRow, firstRow);
+    else filterContainer.appendChild(sortRow);
   }
 
   const sortButtonsContainer = document.getElementById("sort-buttons");
@@ -503,21 +377,19 @@ function applySort() {
     const idxA = Number(a.dataset.index || 0);
     const idxB = Number(b.dataset.index || 0);
 
-    const tsA = Number(a.dataset.ts || NaN);
-    const tsB = Number(b.dataset.ts || NaN);
-    const hasTsA = Number.isFinite(tsA);
-    const hasTsB = Number.isFinite(tsB);
-
     if (sortState.mode === "views") {
       const vA = Number(a.dataset.views || 0);
       const vB = Number(b.dataset.views || 0);
-      if (vB !== vA) return vB - vA; // high views first
-      // tie-breaker: newest first where possible
-      if (hasTsA && hasTsB && tsB !== tsA) return tsB - tsA;
+      if (vB !== vA) return vB - vA;
       return idxA - idxB;
     }
 
-    // age sorting: prefer timestamps if present, else fallback to server order index
+    // Age sort: prefer ts if present; else fallback to server order (idx)
+    const tsA = Number(a.dataset.ts);
+    const tsB = Number(b.dataset.ts);
+    const hasTsA = Number.isFinite(tsA);
+    const hasTsB = Number.isFinite(tsB);
+
     if (hasTsA && hasTsB) {
       return sortState.ageDirection === "newest" ? (tsB - tsA) : (tsA - tsB);
     }
@@ -581,7 +453,7 @@ function initFilters() {
         .filter(Boolean)
         .forEach(k => {
           const upper = k.toUpperCase();
-          if (MBTI_SET.has(upper)) return; // do NOT include MBTI as global keyword filters
+          if (MBTI_SET.has(upper)) return;
           keywordOptions.add(k);
         });
     }
@@ -637,16 +509,17 @@ function filterSections(filterType, value) {
     sections = Array.from(document.querySelectorAll(".content-section"));
   }
 
-  currentFilters[filterType] =
-    value === currentFilters[filterType] ? "all" : value;
+  currentFilters[filterType] = value === currentFilters[filterType] ? "all" : value;
 
-  document.querySelectorAll(`button[data-filter-type="${filterType}"]`).forEach(btn => {
-    const isActive =
-      btn.dataset.value === currentFilters[filterType] &&
-      currentFilters[filterType] !== "all";
-    btn.classList.toggle("active", isActive);
-    btn.setAttribute("aria-pressed", isActive ? "true" : "false");
-  });
+  document
+    .querySelectorAll(`button[data-filter-type="${filterType}"]`)
+    .forEach(btn => {
+      const isActive =
+        btn.dataset.value === currentFilters[filterType] &&
+        currentFilters[filterType] !== "all";
+      btn.classList.toggle("active", isActive);
+      btn.setAttribute("aria-pressed", isActive ? "true" : "false");
+    });
 
   sections.forEach(section => {
     let matches = true;
@@ -675,11 +548,8 @@ function filterSections(filterType, value) {
           .split(",")
           .map(k => k.trim())
           .filter(Boolean);
-        if (fVal.includes(" ")) {
-          matches = kws.some(kw => kw === fVal);
-        } else {
-          matches = kws.some(kw => kw.includes(fVal));
-        }
+        if (fVal.includes(" ")) matches = kws.some(kw => kw === fVal);
+        else matches = kws.some(kw => kw.includes(fVal));
       }
 
       if (!matches) break;
@@ -692,8 +562,8 @@ function filterSections(filterType, value) {
 // ---------- helpers ----------
 
 function escapeHtml(s) {
-  // This decodes *already-escaped* entities from upstream so your titles render correctly.
-  // (It does not escape raw HTML to entities.)
+  // NOTE: this function is being used as a decode/unescape helper in your current setup.
+  // Keeping it consistent with your existing code path.
   return String(s).replace(/&(amp|lt|gt|quot|#39);/g, c => {
     switch (c) {
       case "&amp;": return "&";
@@ -724,14 +594,4 @@ function toTitleCase(s) {
 function displayType(upper) {
   if (upper === "NON-MBTI") return "Non-MBTI";
   return upper;
-}
-
-function slugifyForKym(str) {
-  return String(str || "")
-    .trim()
-    .toLowerCase()
-    .normalize("NFKD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "");
 }
