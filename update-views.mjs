@@ -1,13 +1,12 @@
+// update-views.mjs
 import fs from "node:fs/promises";
 
-const STATIC_FILE = "memes.csv";
+const MEMES_FILE = "memes.csv";
 const OUT_FILE = "meme_daily_updates.csv";
 
-// tune these
-const CONCURRENCY = 3;         // keep low to avoid bot detection
-const REQUEST_DELAY_MS = 175;  // gentle pacing per worker
+const CONCURRENCY = 2;          // keep low to avoid bot detection
+const REQUEST_DELAY_MS = 250;   // pacing between requests
 const RETRIES = 3;
-const RETRY_DELAY_MS = 900;
 
 const IMGFLIP_HEADERS = {
   "User-Agent":
@@ -18,81 +17,188 @@ const IMGFLIP_HEADERS = {
 };
 
 async function main() {
-  const staticCsv = await fs.readFile(STATIC_FILE, "utf8");
-  const staticRows = parseCsv(staticCsv, ",");
+  const memesText = await fs.readFile(MEMES_FILE, "utf8");
+  const memesRows = parseCsv(memesText, ",");
 
-  // Expect headers like ID, URL, etc (your parser lowercases them)
-  // We try common header names.
-  const ids = staticRows
-    .map(r => ({
-      id: String(r.id || r.meme_id || r.image_id || r["column 1"] || "").trim(),
-      url: String(r.url || r.urls || r.page_url || r.link || "").trim()
-    }))
-    .filter(x => x.id);
-
-  if (!ids.length) {
-    throw new Error(`No IDs found in ${STATIC_FILE}. Check header names and delimiter.`);
+  if (!memesRows.length) {
+    console.error(`No rows found in ${MEMES_FILE}.`);
+    process.exit(1);
   }
 
-  console.log(`Loaded ${ids.length} ids from ${STATIC_FILE}`);
+  // Build the list of ids + urls from memes.csv
+  const targets = memesRows
+    .map(r => {
+      const id = pick(r, ["id", "ID", "meme_id", "image_id"]);
+      const urls = pick(r, ["urls", "url", "URL", "page_url"]);
+      const idClean = String(id || "").trim();
+      if (!idClean) return null;
 
-  const results = await mapWithConcurrency(ids, CONCURRENCY, async (row, idx) => {
-    const id = row.id;
-    const url = row.url || `https://imgflip.com/i/${id}`;
+      const urlClean =
+        String(urls || "").trim() || `https://imgflip.com/i/${idClean}`;
 
-    const views = await fetchViewsOnly(id);
-    await sleep(REQUEST_DELAY_MS);
+      return { id: idClean, urls: urlClean };
+    })
+    .filter(Boolean);
 
-    if (views === null) {
-      console.log(`[${idx + 1}/${ids.length}] ${id} -> (no parse) keeping 0`);
-      return { id, url, views: 0 };
+  if (!targets.length) {
+    console.error(`Could not find any usable ids in ${MEMES_FILE}.`);
+    process.exit(1);
+  }
+
+  // Load prior daily updates so we can preserve views on failures
+  const priorMap = await loadPriorViews(OUT_FILE);
+
+  console.log(`Loaded ${targets.length} ids from ${MEMES_FILE}.`);
+  console.log(`Loaded ${priorMap.size} prior view rows from ${OUT_FILE} (if present).`);
+
+  const out = new Array(targets.length);
+
+  let idx = 0;
+  async function worker() {
+    while (idx < targets.length) {
+      const i = idx++;
+      const t = targets[i];
+
+      const prior = priorMap.get(t.id);
+      const priorViews =
+        prior && Number.isFinite(Number(prior.views)) ? Number(prior.views) : 0;
+
+      const fetched = await fetchViewsWithRetry(t.id);
+      const views =
+        fetched.ok && Number.isFinite(fetched.views)
+          ? fetched.views
+          : priorViews;
+
+      out[i] = { id: t.id, urls: t.urls, views };
+
+      await sleep(REQUEST_DELAY_MS);
     }
-
-    console.log(`[${idx + 1}/${ids.length}] ${id} -> ${views}`);
-    return { id, url, views };
-  });
-
-  // Write daily CSV with headers expected by your frontend parser
-  const lines = [];
-  lines.push(["id", "url", "views"].join(","));
-
-  for (const r of results) {
-    // Ensure commas and quotes are safe
-    const id = csvCell(r.id);
-    const url = csvCell(r.url);
-    const views = Number.isFinite(Number(r.views)) ? String(Number(r.views)) : "0";
-    lines.push([id, url, views].join(","));
   }
 
-  await fs.writeFile(OUT_FILE, lines.join("\n") + "\n", "utf8");
-  console.log(`Wrote ${results.length} rows to ${OUT_FILE}`);
+  await Promise.all(Array.from({ length: CONCURRENCY }, worker));
+
+  const lines = [
+    "id,urls,views",
+    ...out
+      .filter(Boolean)
+      .map(r => `${csvCell(r.id)},${csvCell(r.urls)},${csvCell(String(r.views ?? 0))}`)
+  ].join("\n") + "\n";
+
+  await fs.writeFile(OUT_FILE, lines, "utf8");
+
+  const changedCount = out.filter(r => {
+    const p = priorMap.get(r.id);
+    const pv = p ? Number(p.views) : 0;
+    return Number(r.views) !== Number(pv);
+  }).length;
+
+  console.log(`Wrote ${out.length} rows to ${OUT_FILE}. Changed views for ${changedCount} ids.`);
 }
 
-// -------------------- views scraping --------------------
+function pick(row, keys) {
+  for (const k of keys) {
+    if (row && Object.prototype.hasOwnProperty.call(row, String(k).toLowerCase())) {
+      return row[String(k).toLowerCase()];
+    }
+    // also try exact key if caller passed already-lowercased row keys
+    if (row && Object.prototype.hasOwnProperty.call(row, k)) return row[k];
+  }
+  return "";
+}
 
-async function fetchViewsOnly(id) {
+async function loadPriorViews(path) {
+  try {
+    const txt = await fs.readFile(path, "utf8");
+    const rows = parseCsv(txt, ",");
+    const map = new Map();
+    for (const r of rows) {
+      const id = String(pick(r, ["id", "meme_id", "image_id"])).trim();
+      if (!id) continue;
+      const views = Number(String(pick(r, ["views"])).trim());
+      map.set(id, { id, views: Number.isFinite(views) ? views : 0 });
+    }
+    return map;
+  } catch {
+    return new Map();
+  }
+}
+
+// -------------------- fetching + parsing --------------------
+
+async function fetchViewsWithRetry(id) {
   const url = `https://imgflip.com/i/${id}`;
 
-  const html = await fetchHtml(url);
-  if (!html) return null;
+  for (let attempt = 1; attempt <= RETRIES; attempt++) {
+    try {
+      const res = await fetch(url, {
+        headers: IMGFLIP_HEADERS
+      });
 
+      if (!res.ok) {
+        if ((res.status === 429 || res.status === 503) && attempt < RETRIES) {
+          await sleep(700 * attempt);
+          continue;
+        }
+        return { ok: false };
+      }
+
+      const html = await res.text();
+
+      // bot/captcha guard
+      const head = html.slice(0, 5000).toLowerCase();
+      if (head.includes("captcha") || head.includes("unusual traffic")) {
+        return { ok: false };
+      }
+
+      const views = extractViews(html);
+      if (Number.isFinite(views)) return { ok: true, views };
+
+      // If parse fails, do not retry too aggressively; still retry a couple of times
+      if (attempt < RETRIES) {
+        await sleep(500 * attempt);
+        continue;
+      }
+
+      return { ok: false };
+    } catch {
+      if (attempt < RETRIES) {
+        await sleep(700 * attempt);
+        continue;
+      }
+      return { ok: false };
+    }
+  }
+
+  return { ok: false };
+}
+
+function extractViews(html) {
+  // 1) Prefer __NEXT_DATA__ JSON
   const next = extractNextData(html);
   const image = extractImageFromNext(next);
 
-  // Preferred: NextJS data object
-  if (image) {
-    const views = coerceViews(image);
-    if (Number.isFinite(views)) return views;
+  // Try common-ish view count keys
+  if (image && typeof image === "object") {
+    const candidates = [
+      image.views,
+      image.view_count,
+      image.viewCount,
+      image.ensighten_views
+    ];
+    for (const c of candidates) {
+      const n = Number(c);
+      if (Number.isFinite(n)) return n;
+    }
   }
 
-  // Fallback: loose text pattern like "12,345 views"
+  // 2) Conservative regex fallback: "12,345 views"
   const m = html.match(/([0-9][0-9,]*)\s+views/i);
   if (m && m[1]) {
-    const v = Number(String(m[1]).replace(/,/g, ""));
-    if (Number.isFinite(v)) return v;
+    const n = Number(String(m[1]).replace(/,/g, ""));
+    if (Number.isFinite(n)) return n;
   }
 
-  return null;
+  return NaN;
 }
 
 function extractNextData(html) {
@@ -116,59 +222,7 @@ function extractImageFromNext(next) {
   );
 }
 
-function coerceViews(imageObj) {
-  const candidates = [
-    imageObj.views,
-    imageObj.ensighten_views,
-    imageObj.view_count,
-    imageObj.viewCount
-  ];
-  for (const c of candidates) {
-    const n = Number(c);
-    if (Number.isFinite(n)) return n;
-  }
-  return NaN;
-}
-
-async function fetchHtml(url) {
-  const res = await fetchWithRetry(url, {}, RETRIES, RETRY_DELAY_MS);
-  if (!res.ok) return "";
-
-  const text = await res.text();
-  const head = text.slice(0, 4000).toLowerCase();
-  if (head.includes("captcha") || head.includes("unusual traffic")) return "";
-  return text;
-}
-
-async function fetchWithRetry(url, options = {}, retries = 3, delay = 900) {
-  const { headers = IMGFLIP_HEADERS, ...rest } = options;
-
-  for (let attempt = 1; attempt <= retries; attempt++) {
-    try {
-      const res = await fetch(url, { headers, ...rest });
-
-      if (res.ok) return res;
-
-      if (res.status === 429 || res.status === 503) {
-        if (attempt < retries) {
-          await sleep(delay * attempt);
-          continue;
-        }
-      }
-
-      if (attempt === retries) return res;
-      await sleep(delay * attempt);
-    } catch {
-      if (attempt === retries) throw new Error(`fetch failed: ${url}`);
-      await sleep(delay * attempt);
-    }
-  }
-
-  throw new Error("Max retries exceeded");
-}
-
-// -------------------- CSV parsing --------------------
-// NOTE: this is intentionally the same style as your frontend: header-based + quote-aware.
+// -------------------- CSV utils --------------------
 
 function parseCsv(text, delimiter = ",") {
   const lines = String(text)
@@ -185,6 +239,7 @@ function parseCsv(text, delimiter = ",") {
   });
 
   const out = [];
+
   for (let i = 1; i < lines.length; i++) {
     const cols = splitCsvLine(lines[i], delimiter);
     if (!cols.length) continue;
@@ -195,6 +250,7 @@ function parseCsv(text, delimiter = ",") {
     }
     out.push(row);
   }
+
   return out;
 }
 
@@ -231,28 +287,13 @@ function splitCsvLine(line, delimiter = ",") {
   return out.map(x => x.trim());
 }
 
-function csvCell(v) {
-  const s = String(v ?? "");
-  // Quote if needed
-  if (/[",\n\r]/.test(s)) return `"${s.replace(/"/g, '""')}"`;
-  return s;
-}
-
-// -------------------- concurrency helpers --------------------
-
-async function mapWithConcurrency(items, concurrency, fn) {
-  const out = new Array(items.length);
-  let idx = 0;
-
-  async function worker() {
-    while (idx < items.length) {
-      const i = idx++;
-      out[i] = await fn(items[i], i);
-    }
+function csvCell(s) {
+  const v = String(s ?? "");
+  // quote if it contains commas/quotes/newlines
+  if (/[",\r\n]/.test(v)) {
+    return `"${v.replace(/"/g, '""')}"`;
   }
-
-  await Promise.all(Array.from({ length: concurrency }, worker));
-  return out;
+  return v;
 }
 
 function sleep(ms) {
