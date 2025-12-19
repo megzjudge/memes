@@ -3,7 +3,7 @@
 // - Renders Imgflip icons row
 // - Loads /memes.csv (static metadata) + /meme_daily_updates.csv (views)
 // - Provides filters + sorting
-// - Adds frequency-weighted font sizing for Meme Type + Keywords filter buttons
+// - Adds frequency-weighted font sizing + color weighting for Meme Type + Keywords filter buttons
 
 // ------------ Imgflip icons (top of page) ------------
 
@@ -544,7 +544,7 @@ function updateSortButtonsUI() {
   }
 }
 
-// ---------- filters (with frequency-weighted sizing) ----------
+// ---------- filters (with frequency-weighted sizing + color weighting) ----------
 
 function initFilters() {
   sections = Array.from(document.querySelectorAll(".content-section"));
@@ -555,7 +555,7 @@ function initFilters() {
 
   const typeOptions = new Set();
 
-  // NEW: counts for weighting font-size
+  // counts for weighting font-size + color
   const memeCounts = new Map();    // meme_type -> count
   const keywordCounts = new Map(); // keyword -> count
 
@@ -603,7 +603,6 @@ function initFilters() {
     typeOptions.add("ANY-MBTI");
   }
 
-  // Order type filters: Any MBTI -> 16 types -> Non-MBTI (if present)
   const typeValues = Array.from(typeOptions);
   const orderedTypeValues = [
     ...(typeValues.includes("ANY-MBTI") ? ["ANY-MBTI"] : []),
@@ -628,6 +627,20 @@ function buildFilterButtons(container, values, filterType, countsMap) {
   allBtn.addEventListener("click", () => filterSections(filterType, "all"));
   container.appendChild(allBtn);
 
+  // If we have counts, compute min/max once for consistent scaling + coloring
+  let minC = Infinity;
+  let maxC = -Infinity;
+  if (countsMap instanceof Map) {
+    for (const v of countsMap.values()) {
+      if (v < minC) minC = v;
+      if (v > maxC) maxC = v;
+    }
+    if (!Number.isFinite(minC) || !Number.isFinite(maxC)) {
+      minC = 0;
+      maxC = 0;
+    }
+  }
+
   values.forEach(val => {
     if (!val || typeof val !== "string") return;
     const btn = document.createElement("button");
@@ -645,12 +658,17 @@ function buildFilterButtons(container, values, filterType, countsMap) {
       btn.textContent = val;
     }
 
-    // NEW: frequency-weighted font sizing (meme + keywords only)
+    // Frequency-weighted font sizing + color (meme + keywords only)
     if (countsMap instanceof Map) {
       const count = countsMap.get(val) || 0;
-      const size = scaleFontSize(count, countsMap);
+
+      const size = scaleFontSizeFromMinMax(count, minC, maxC);
       btn.style.fontSize = `${size}rem`;
       btn.title = `${btn.textContent} (${count})`;
+
+      const { bg, border } = colorForCountFromMinMax(count, minC, maxC);
+      btn.style.backgroundColor = bg;
+      btn.style.borderColor = border;
     }
 
     btn.addEventListener("click", () => filterSections(filterType, btn.dataset.value));
@@ -751,17 +769,12 @@ function displayType(upper) {
   return upper;
 }
 
-// NEW: scales font size based on frequency with a log curve
-function scaleFontSize(count, countsMap) {
+// ---- sizing + color weighting helpers ----
+
+// scales font size based on frequency with a log curve (stable across huge ranges)
+function scaleFontSizeFromMinMax(count, minC, maxC) {
   const MIN = 0.80; // rem
   const MAX = 1.15; // rem
-
-  let minC = Infinity;
-  let maxC = -Infinity;
-  for (const v of countsMap.values()) {
-    if (v < minC) minC = v;
-    if (v > maxC) maxC = v;
-  }
 
   if (!Number.isFinite(minC) || !Number.isFinite(maxC) || minC === maxC) {
     return (MIN + MAX) / 2;
@@ -771,5 +784,89 @@ function scaleFontSize(count, countsMap) {
   const logMax = Math.log(maxC + 1);
   const t = (Math.log(count + 1) - logMin) / (logMax - logMin);
 
-  return MIN + t * (MAX - MIN);
+  return MIN + clamp01(t) * (MAX - MIN);
+}
+
+// Color mapping:
+// Base (mid) color is #5e3b83
+// - least used => lighter
+// - most used  => darker
+function colorForCountFromMinMax(count, minC, maxC) {
+  const BASE = "#5e3b83";
+
+  if (!Number.isFinite(minC) || !Number.isFinite(maxC) || minC === maxC) {
+    return { bg: BASE, border: shadeColor(BASE, -0.18) };
+  }
+
+  const logMin = Math.log(minC + 1);
+  const logMax = Math.log(maxC + 1);
+  const t = (Math.log(count + 1) - logMin) / (logMax - logMin); // 0..1
+  const x = clamp01(t);
+
+  // x=0 => lighter, x=1 => darker
+  const shade = 0.35 - 0.55 * x; // +0.35 (light) down to ~ -0.20 (dark)
+
+  const bg = shadeColor(BASE, shade);
+  const border = shadeColor(BASE, shade - 0.18);
+  return { bg, border };
+}
+
+// Mix color toward white (t > 0) or black (t < 0), t in [-1..+1]
+function shadeColor(hex, t) {
+  const { r, g, b } = hexToRgb(hex);
+  const tt = clamp(t, -1, 1);
+
+  if (tt >= 0) {
+    return rgbToHex(
+      r + (255 - r) * tt,
+      g + (255 - g) * tt,
+      b + (255 - b) * tt
+    );
+  }
+
+  const k = Math.abs(tt);
+  return rgbToHex(r * (1 - k), g * (1 - k), b * (1 - k));
+}
+
+function clamp01(n) {
+  return Math.max(0, Math.min(1, n));
+}
+
+function clamp(n, a, b) {
+  return Math.max(a, Math.min(b, n));
+}
+
+function hexToRgb(hex) {
+  const h = String(hex).replace("#", "").trim();
+  const full = h.length === 3 ? h.split("").map(c => c + c).join("") : h;
+  const n = parseInt(full, 16);
+  return {
+    r: (n >> 16) & 255,
+    g: (n >> 8) & 255,
+    b: n & 255
+  };
+}
+
+function rgbToHex(r, g, b) {
+  const to = v => clamp(Math.round(v), 0, 255).toString(16).padStart(2, "0");
+  return `#${to(r)}${to(g)}${to(b)}`;
+}
+
+// Backward-compatible function (kept so nothing breaks if referenced elsewhere)
+function scaleFontSize(count, countsMap) {
+  if (!(countsMap instanceof Map)) return 1.0;
+
+  let minC = Infinity;
+  let maxC = -Infinity;
+  for (const v of countsMap.values()) {
+    if (v < minC) minC = v;
+    if (v > maxC) maxC = v;
+  }
+
+  if (!Number.isFinite(minC) || !Number.isFinite(maxC)) {
+    minC = 0;
+    maxC = 0;
+  }
+
+  return scaleFontSizeFromMinMax(count, minC, maxC);
 }

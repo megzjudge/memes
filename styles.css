@@ -116,7 +116,8 @@ header p {
     margin: 0;
     padding: 8px 12px;
     border: 1px solid #e0d7f7;
-    background-color: transparent;
+    background-color: var(--chip-bg, transparent);
+    border-color: var(--chip-border, #e0d7f7);
     color: #e0d7f7;
     cursor: pointer;
     border-radius: 8px;
@@ -133,6 +134,7 @@ header p {
 }
 
 .filter-container button:hover {
+    filter: brightness(1.08);
     background-color: rgba(224, 215, 247, 0.2);
     box-shadow: 0 4px 8px rgba(0, 0, 0, 0.3);
 }
@@ -313,7 +315,9 @@ a {
 }
 
 .section-buttons button:hover {
-    background-color: #ced4da;
+    filter: brightness(1.08);
+    background-color: var(--chip-bg, transparent);
+    border-color: var(--chip-border, #e0d7f7);
     color: #333;
 }
 
