@@ -3,10 +3,9 @@ import fs from "node:fs/promises";
 const MEMES_FILE = "memes.csv";
 const OUT_FILE = "meme_daily_updates.csv";
 
-// Tune these:
-const REQUEST_DELAY_MS = 250;     // be gentle
-const MAX_ITEMS = 350;            // safety cap; set to 99999 if you want all
-const STOP_ON_BLOCKED = 8;        // if we keep getting blocked, stop early
+const REQUEST_DELAY_MS = 250;
+const MAX_ITEMS = 350;
+const STOP_ON_BLOCKED = 8;
 
 const IMGFLIP_HEADERS = {
   "User-Agent":
@@ -21,10 +20,9 @@ async function main() {
   const memesRows = parseCsv(memesText, ",");
 
   if (!memesRows.length) {
-    throw new Error(`No rows found in ${MEMES_FILE}. Check headers/format.`);
+    throw new Error("No rows found in " + MEMES_FILE);
   }
 
-  // Your headers currently show "urls" not "url"
   const memes = memesRows
     .map(r => {
       const id = pick(r, ["id", "ID", "meme_id", "image_id"]);
@@ -32,13 +30,12 @@ async function main() {
       if (!id) return null;
       return {
         id: String(id).trim(),
-        urls: String(urls || `https://imgflip.com/i/${id}`).trim()
+        urls: String(urls || ("https://imgflip.com/i/" + id)).trim()
       };
     })
     .filter(Boolean)
     .slice(0, MAX_ITEMS);
 
-  // Load existing output for fallback
   let existingMap = new Map();
   try {
     const outText = await fs.readFile(OUT_FILE, "utf8");
@@ -46,15 +43,14 @@ async function main() {
     for (const r of outRows) {
       const id = String(pick(r, ["id", "ID"]) || "").trim();
       if (!id) continue;
-      const v = Number(String(pick(r, ["views", "VIEWS"]) ?? "").replace(/,/g, "").trim());
+      const raw = pick(r, ["views", "VIEWS"]);
+      const v = Number(String(raw || "").replace(/,/g, "").trim());
       existingMap.set(id, Number.isFinite(v) ? v : 0);
     }
-  } catch {
-    // file may not exist yet, that's fine
-  }
+  } catch {}
 
-  console.log(`Loaded ${memes.length} meme IDs from ${MEMES_FILE}`);
-  console.log(`Loaded ${existingMap.size} existing view values from ${OUT_FILE} (if present)`);
+  console.log("Loaded " + memes.length + " meme IDs from " + MEMES_FILE);
+  console.log("Loaded " + existingMap.size + " existing view values from " + OUT_FILE + " (if present)");
 
   let blockedCount = 0;
   let updated = 0;
@@ -62,30 +58,33 @@ async function main() {
   const results = [];
 
   for (let i = 0; i < memes.length; i++) {
-    const { id, urls } = memes[i];
+    const id = memes[i].id;
+    const urls = memes[i].urls;
 
-    const { views, blocked } = await fetchViewsForMeme(id);
+    const out = await fetchViewsForMeme(id);
+    const views = out.views;
+    const blocked = out.blocked;
 
     if (blocked) {
       blockedCount++;
-      const fallback = existingMap.get(id) ?? 0;
+      const fallback = existingMap.has(id) ? existingMap.get(id) : 0;
       results.push({ id, urls, views: fallback });
-      console.log(`[${i + 1}/${memes.length}] ${id} BLOCKED -> keep ${fallback}`);
+      console.log("[" + (i + 1) + "/" + memes.length + "] " + id + " BLOCKED -> keep " + fallback);
+
       if (blockedCount >= STOP_ON_BLOCKED) {
-        console.log(`Stopping early: blocked ${blockedCount} times (captcha / unusual traffic).`);
+        console.log("Stopping early: blocked " + blockedCount + " times.");
         break;
       }
     } else {
       const v = Number.isFinite(views) ? views : 0;
       results.push({ id, urls, views: v });
-      if (v !== (existingMap.get(id) ?? 0)) updated++;
-      console.log(`[${i + 1}/${memes.length}] ${id} views=${v}`);
+      if (v !== (existingMap.has(id) ? existingMap.get(id) : 0)) updated++;
+      console.log("[" + (i + 1) + "/" + memes.length + "] " + id + " views=" + v);
     }
 
     await sleep(REQUEST_DELAY_MS);
   }
 
-  // Write CSV
   const lines = [];
   lines.push(["ID", "URLS", "VIEWS"].join(","));
   for (const r of results) {
@@ -93,13 +92,13 @@ async function main() {
   }
   await fs.writeFile(OUT_FILE, lines.join("\n") + "\n", "utf8");
 
-  console.log(`Wrote ${results.length} rows to ${OUT_FILE}`);
-  console.log(`Changed view counts for ${updated} rows (vs previous file)`);
-  console.log(`Blocked/captcha rows encountered: ${blockedCount}`);
+  console.log("Wrote " + results.length + " rows to " + OUT_FILE);
+  console.log("Changed view counts for " + updated + " rows (vs previous file)");
+  console.log("Blocked/captcha rows encountered: " + blockedCount);
 }
 
 async function fetchViewsForMeme(id) {
-  const url = `https://imgflip.com/i/${id}`;
+  const url = "https://imgflip.com/i/" + id;
   const html = await fetchText(url);
 
   if (!html) return { views: 0, blocked: true };
@@ -109,34 +108,42 @@ async function fetchViewsForMeme(id) {
     return { views: 0, blocked: true };
   }
 
-  // Best: __NEXT_DATA__ JSON
   const next = extractNextData(html);
   if (next) {
-    const candidate =
-      next?.props?.pageProps?.image?.views ??
-      next?.props?.pageProps?.data?.image?.views ??
-      next?.props?.pageProps?.image?.view_count ??
-      next?.props?.pageProps?.data?.image?.view_count ??
-      null;
+    // Try several common shapes without optional chaining
+    let candidate = null;
+
+    candidate = getDeep(next, ["props", "pageProps", "image", "views"]);
+    if (candidate === null) candidate = getDeep(next, ["props", "pageProps", "data", "image", "views"]);
+    if (candidate === null) candidate = getDeep(next, ["props", "pageProps", "image", "view_count"]);
+    if (candidate === null) candidate = getDeep(next, ["props", "pageProps", "data", "image", "view_count"]);
 
     const v = toInt(candidate);
     if (Number.isFinite(v)) return { views: v, blocked: false };
   }
 
-  // Fallback 1: any "views":12345 in the page JSON blobs
+  // Fallback 1
   {
     const m = html.match(/"views"\s*:\s*(\d{1,12})/);
     if (m) return { views: Number(m[1]), blocked: false };
   }
 
-  // Fallback 2: look for "12,345 views" style
+  // Fallback 2
   {
     const m = html.match(/([\d,]{1,15})\s+views/i);
     if (m) return { views: Number(m[1].replace(/,/g, "")), blocked: false };
   }
 
-  // If nothing found, treat as not blocked but unknown
   return { views: 0, blocked: false };
+}
+
+function getDeep(obj, path) {
+  let cur = obj;
+  for (const key of path) {
+    if (!cur || typeof cur !== "object" || !(key in cur)) return null;
+    cur = cur[key];
+  }
+  return cur;
 }
 
 function extractNextData(html) {
@@ -170,8 +177,8 @@ function toInt(x) {
 }
 
 function csvEscape(s) {
-  const v = String(s ?? "");
-  if (/[",\n\r]/.test(v)) return `"${v.replace(/"/g, '""')}"`;
+  const v = String(s || "");
+  if (/[",\n\r]/.test(v)) return '"' + v.replace(/"/g, '""') + '"';
   return v;
 }
 
@@ -179,16 +186,13 @@ function pick(obj, keys) {
   if (!obj) return "";
   for (const k of keys) {
     const key = String(k).toLowerCase();
-    // parseCsv lowercases headers, so we should check lowercased keys too
     if (obj[key] !== undefined) return obj[key];
-    // also check original key if provided
     if (obj[k] !== undefined) return obj[k];
   }
   return "";
 }
 
-// Quote-aware CSV parser (same logic style as your front-end)
-function parseCsv(text, delimiter = ",") {
+function parseCsv(text, delimiter) {
   const lines = String(text)
     .split(/\r?\n/)
     .map(l => l.trim())
@@ -197,7 +201,7 @@ function parseCsv(text, delimiter = ",") {
   if (lines.length < 2) return [];
 
   const headers = splitCsvLine(lines[0], delimiter).map((h, idx) => {
-    let hh = String(h ?? "");
+    let hh = String(h || "");
     if (idx === 0) hh = hh.replace(/^\uFEFF/, "");
     return hh.trim().toLowerCase();
   });
@@ -216,7 +220,7 @@ function parseCsv(text, delimiter = ",") {
   return out;
 }
 
-function splitCsvLine(line, delimiter = ",") {
+function splitCsvLine(line, delimiter) {
   const s = String(line);
   const out = [];
   let cur = "";
