@@ -4,14 +4,7 @@ const USERNAME = "mbtininja";
 const LIST_URL = `https://imgflip.com/all/user-images/${USERNAME}?sort=latest`;
 
 const OUT_FILE = "memes.csv";
-
-// You said “first page only” and mentioned 14.
-const LIST_MAX_IDS = 14;
-
-// Total cap for your archive (optional; raise if you want)
-const MAX_ITEMS = 5000;
-
-// gentle pacing
+const MAX_ITEMS = 200;
 const REQUEST_DELAY_MS = 175;
 
 const IMGFLIP_HEADERS = {
@@ -35,85 +28,51 @@ const MEME_TYPE_EXCLUDE = new Set([
 ]);
 
 async function main() {
-  const existing = await readJsonLines(OUT_FILE);
-  const existingIds = new Set(
-    existing.map(x => String(x?.id || "").trim()).filter(Boolean)
-  );
-
   const html = await fetchText(LIST_URL);
-  const page1Ids = collectIdsFromListingHtml(html).slice(0, LIST_MAX_IDS);
+  const ids = collectIdsFromListingHtml(html).slice(0, MAX_ITEMS);
 
-  if (!page1Ids.length) {
-    console.log("No IDs found on listing page. No update performed.");
-    return;
-  }
-
-  const newIds = page1Ids.filter(id => !existingIds.has(id));
-
-  if (!newIds.length) {
-    console.log("No new memes found.");
-    return;
-  }
-
-  console.log(`Found ${newIds.length} new meme(s): ${newIds.join(", ")}`);
-
-  const newItems = [];
-  for (const id of newIds) {
+  const items = [];
+  for (const id of ids) {
     const item = await fetchAndParseItem(id);
-    if (item) newItems.push(item);
+    if (item) items.push(item);
     await sleep(REQUEST_DELAY_MS);
   }
 
-  // Prepend new items (newest-first already) then keep old ones
-  const merged = [...newItems, ...existing].slice(0, MAX_ITEMS);
+  const header = [
+    "id",
+    "url",
+    "image_url",
+    "is_gif",
+    "title",
+    "meme_type",
+    "kym_slug",
+    "mbti_types",
+    "keywords",
+    "tags"
+  ];
 
-  // Write atomically: temp file then rename
-  const tmp = `${OUT_FILE}.tmp`;
-  await writeJsonLines(tmp, merged);
-  await fs.rename(tmp, OUT_FILE);
+  const rows = [header];
 
-  console.log(`Updated ${OUT_FILE}: prepended ${newItems.length} new item(s). Total: ${merged.length}.`);
-}
-
-// ------------------------- JSONL IO -------------------------
-
-async function readJsonLines(path) {
-  try {
-    const raw = await fs.readFile(path, "utf8");
-    return raw
-      .split(/\r?\n/)
-      .map(l => l.trim())
-      .filter(Boolean)
-      .map(l => safeParseJsonLine(l))
-      .filter(Boolean);
-  } catch (e) {
-    if (e && e.code === "ENOENT") return [];
-    throw e;
+  for (const it of items) {
+    rows.push([
+      it.id,
+      it.url,
+      it.image_url,
+      String(Boolean(it.is_gif)),
+      it.title,
+      it.meme_type,
+      it.kym_slug,
+      JSON.stringify(Array.isArray(it.mbti_types) ? it.mbti_types : []),
+      JSON.stringify(Array.isArray(it.keywords) ? it.keywords : []),
+      JSON.stringify(Array.isArray(it.tags) ? it.tags : [])
+    ]);
   }
+
+  const csv = rows.map(r => r.map(csvEscape).join(",")).join("\n") + "\n";
+  await fs.writeFile(OUT_FILE, csv, "utf8");
+
+  console.log(`Wrote ${items.length} rows to ${OUT_FILE}`);
 }
-
-function safeParseJsonLine(line) {
-  // tolerate common copy/paste artifacts
-  const normalized = line
-    .replace(/\t+/g, " ")
-    .replace(/[“”]/g, '"')
-    .replace(/\bTRUE\b/g, "true")
-    .replace(/\bFALSE\b/g, "false")
-    .replace(/,\s*$/, "");
-
-  try {
-    return JSON.parse(normalized);
-  } catch {
-    return null;
-  }
-}
-
-async function writeJsonLines(path, items) {
-  const lines = items.map(x => JSON.stringify(x));
-  await fs.writeFile(path, lines.join("\n") + "\n", "utf8");
-}
-
-// ------------------------- Scrape / parse -------------------------
 
 function collectIdsFromListingHtml(html) {
   if (!html) return [];
@@ -144,7 +103,9 @@ async function fetchAndParseItem(id) {
 }
 
 function extractNextData(html) {
-  const match = html.match(/<script[^>]+id=["']__NEXT_DATA__["'][^>]*>([\s\S]*?)<\/script>/);
+  const match = html.match(
+    /<script[^>]+id=["']__NEXT_DATA__["'][^>]*>([\s\S]*?)<\/script>/
+  );
   if (!match) return null;
   try { return JSON.parse(match[1]); } catch { return null; }
 }
@@ -160,7 +121,7 @@ function extractImageFromNext(next) {
 
 function parseFromJson(obj, id, pageUrl) {
   const item = minimalItem(id);
-  item.page_url = pageUrl;
+  item.url = pageUrl;
 
   item.title = (obj.title && String(obj.title).trim()) ? String(obj.title).trim() : id;
 
@@ -171,17 +132,16 @@ function parseFromJson(obj, id, pageUrl) {
     item.is_gif = u.toLowerCase().endsWith(".gif");
   }
 
-  const created = obj.created_at || obj.created || obj.createdAt || obj.submitted_at || "";
-  const createdTs = Date.parse(String(created));
-  if (Number.isFinite(createdTs)) item.created_ts = createdTs;
-
   const tagsRaw = Array.isArray(obj.tags) ? obj.tags : [];
-  const tags = tagsRaw.map(t => String(t).toLowerCase().trim()).filter(Boolean);
+  const tags = tagsRaw
+    .map(t => String(t).toLowerCase().trim())
+    .filter(Boolean);
   item.tags = tags;
 
-  // meme_type
   let memeType = "";
-  if (obj.template?.name) memeType = String(obj.template.name).replace(/ meme$/i, "").trim();
+  if (obj.template?.name) {
+    memeType = String(obj.template.name).replace(/ meme$/i, "").trim();
+  }
   if (!memeType) {
     for (const t of tags) {
       const upper = t.toUpperCase();
@@ -193,19 +153,23 @@ function parseFromJson(obj, id, pageUrl) {
   }
   item.meme_type = memeType ? toTitleCase(memeType) : "";
 
-  // mbti_types + keywords
   const mbti = [];
   const keywords = [];
   for (const t of tags) {
     const upper = t.toUpperCase();
-    if (MBTI_TYPES.has(upper)) { mbti.push(upper); continue; }
+    if (MBTI_TYPES.has(upper)) {
+      mbti.push(upper);
+      continue;
+    }
+    // remove meme_type from keywords (if it matches)
     if (item.meme_type && t === item.meme_type.toLowerCase()) continue;
     keywords.push(t);
   }
-  item.mbti_types = unique(mbti.length ? mbti : ["non-mbti"]);
+
+  item.mbti_types = unique(mbti);
   item.keywords = unique(keywords);
 
-  // per your rule: leave KYM blank
+  // keep blank as requested
   item.kym_slug = "";
 
   return item;
@@ -214,35 +178,32 @@ function parseFromJson(obj, id, pageUrl) {
 function minimalItem(id) {
   return {
     id,
-    page_url: `https://imgflip.com/i/${id}`,
+    url: `https://imgflip.com/i/${id}`,
     image_url: `https://i.imgflip.com/${id}.jpg`,
     is_gif: false,
     title: id,
     meme_type: "",
     kym_slug: "",
-    mbti_types: ["non-mbti"],
+    mbti_types: [],
     keywords: [],
-    tags: [],
-    created_ts: 0
+    tags: []
   };
 }
 
-// ------------------------- HTTP -------------------------
-
 async function fetchText(url) {
-  try {
-    const res = await fetch(url, { headers: IMGFLIP_HEADERS });
-    if (!res.ok) return "";
-    const text = await res.text();
-    const head = text.slice(0, 4000).toLowerCase();
-    if (head.includes("captcha") || head.includes("unusual traffic")) return "";
-    return text;
-  } catch {
-    return "";
-  }
+  const res = await fetch(url, { headers: IMGFLIP_HEADERS });
+  if (!res.ok) return "";
+  const text = await res.text();
+  const head = text.slice(0, 4000).toLowerCase();
+  if (head.includes("captcha") || head.includes("unusual traffic")) return "";
+  return text;
 }
 
-// ------------------------- utils -------------------------
+function csvEscape(v) {
+  const s = String(v ?? "");
+  if (/[",\r\n]/.test(s)) return `"${s.replace(/"/g, '""')}"`;
+  return s;
+}
 
 function unique(arr) { return Array.from(new Set(arr)); }
 function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
