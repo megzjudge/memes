@@ -288,11 +288,16 @@ a {
     transition: background-color 0.2s, color 0.2s;
 }
 
-.section-buttons button[data-filter-type="type"],
+.section-buttons button[data-filter-type="type"] {
+        background-color: #63469A;
+        border-color: #63469A;
+        color: #e0d7f7;
+}
+
 .section-buttons button[data-filter-type="meme"] {
-    background-color: #7C5CBF;
-    color: #e0d7f7;
-    border-color: #7C5CBF;
+        background-color: #7052AD;
+        border-color: #7052AD;
+        color: #e0d7f7;
 }
 
 .section-buttons button[data-filter-type="type"]:hover,
@@ -529,22 +534,6 @@ footer a:hover {
     .section-buttons button {
         padding: 5px 8px;
         font-size: 0.8rem;
-    }
-
-    button.chip-type {
-        background-color: #e0d7f7;
-        border-color: #c1b3f0;
-    }
-
-    button.chip-meme {
-        background-color: #63469A;
-        border-color: #63469A;
-        color: #e0d7f7;
-    }
-
-    button.chip-meme:hover {
-        background-color: #7052AD;
-        border-color: #7052AD;
     }
 
     .image-container {
