@@ -1,11 +1,10 @@
 import fs from "node:fs/promises";
 
-const STATIC_FILE = "memes.csv";
-const OUT_FILE = "meme_daily_updates.csv";
+const IN_FILE = "memes.csv";                 // JSONL, produced by update-memes.mjs
+const OUT_FILE = "meme_daily_updates.csv";   // CSV: id,page_url,views
 
-const UPDATE_NEWEST_N = 500;   // set to Infinity to do all
-const CONCURRENCY = 2;
-const REQUEST_DELAY_MS = 175;
+const REQUEST_DELAY_MS = 175; // gentle pacing; adjust if needed
+const MAX_IDS = 5000;         // safety cap, should match your static cap
 
 const IMGFLIP_HEADERS = {
   "User-Agent":
@@ -16,97 +15,85 @@ const IMGFLIP_HEADERS = {
 };
 
 async function main() {
-  const staticItems = await readJsonLines(STATIC_FILE);
-  const ids = staticItems.map(x => String(x?.id || "").trim()).filter(Boolean);
+  const staticItems = await readJsonLines(IN_FILE);
+  const items = staticItems.slice(0, MAX_IDS);
 
-  if (!ids.length) {
-    console.log("No ids found in memes.csv; nothing to update.");
+  if (!items.length) {
+    await fs.writeFile(OUT_FILE, "id,page_url,views\n", "utf8");
+    console.log(`No items in ${IN_FILE}. Wrote empty ${OUT_FILE}.`);
     return;
   }
 
-  const prior = await readJsonLines(OUT_FILE);
-  const priorMap = new Map(
-    prior.filter(x => x && x.id).map(x => [String(x.id).trim(), x])
-  );
+  const rows = [];
+  rows.push(["id", "page_url", "views"]);
 
-  const targetIds = (UPDATE_NEWEST_N === Infinity) ? ids : ids.slice(0, UPDATE_NEWEST_N);
+  for (const it of items) {
+    const id = String(it?.id || "").trim();
+    if (!id) continue;
 
-  console.log(`Updating views for ${targetIds.length} meme(s)...`);
+    const pageUrl = it?.page_url ? String(it.page_url).trim() : `https://imgflip.com/i/${id}`;
 
-  const outMap = new Map(priorMap);
-  let idx = 0;
+    const views = await fetchViewsOnly(id);
+    rows.push([id, pageUrl, String(views)]);
 
-  async function worker() {
-    while (idx < targetIds.length) {
-      const my = idx++;
-      const id = targetIds[my];
-      const page_url = `https://imgflip.com/i/${id}`;
-
-      const priorRow = outMap.get(id) || { id, page_url, views: 0 };
-      const views = await fetchViews(id);
-
-      if (Number.isFinite(views)) {
-        outMap.set(id, { id, page_url, views });
-      } else {
-        outMap.set(id, {
-          id,
-          page_url,
-          views: Number.isFinite(Number(priorRow.views)) ? Number(priorRow.views) : 0
-        });
-      }
-
-      await sleep(REQUEST_DELAY_MS);
-    }
+    await sleep(REQUEST_DELAY_MS);
   }
 
-  await Promise.all(Array.from({ length: CONCURRENCY }, worker));
-
-  // output in memes.csv order (newest first)
-  const finalRows = ids.map(id => {
-    const row = outMap.get(id) || { id, page_url: `https://imgflip.com/i/${id}`, views: 0 };
-    return {
-      id,
-      page_url: row.page_url || `https://imgflip.com/i/${id}`,
-      views: Number.isFinite(Number(row.views)) ? Number(row.views) : 0
-    };
-  });
-
-  const tmp = `${OUT_FILE}.tmp`;
-  await writeJsonLines(tmp, finalRows);
-  await fs.rename(tmp, OUT_FILE);
-
-  console.log(`Wrote ${finalRows.length} rows to ${OUT_FILE}`);
+  const csv = rows.map(r => r.map(csvEscape).join(",")).join("\n") + "\n";
+  await fs.writeFile(OUT_FILE, csv, "utf8");
+  console.log(`Wrote ${rows.length - 1} rows to ${OUT_FILE}`);
 }
 
-async function fetchViews(id) {
-  const url = `https://imgflip.com/i/${id}`;
-  const html = await fetchText(url);
-  if (!html) return NaN;
+async function readJsonLines(path) {
+  let raw = "";
+  try {
+    raw = await fs.readFile(path, "utf8");
+  } catch {
+    return [];
+  }
 
+  return raw
+    .split(/\r?\n/)
+    .map(l => l.trim())
+    .filter(Boolean)
+    .map(l => {
+      try { return JSON.parse(l); } catch { return null; }
+    })
+    .filter(Boolean);
+}
+
+async function fetchViewsOnly(id) {
+  const url = `https://imgflip.com/i/${id}`;
+  const html = await fetchHtml(url);
+  if (!html) return 0;
+
+  // Prefer __NEXT_DATA__ extraction
   const next = extractNextData(html);
   const image = extractImageFromNext(next);
-
   if (image) {
     const v = coerceViews(image);
     if (Number.isFinite(v)) return v;
   }
 
+  // Fallback: regex like "12,345 views"
   const m = html.match(/([0-9][0-9,]*)\s+views/i);
   if (m && m[1]) {
-    const v = Number(String(m[1]).replace(/,/g, ""));
-    if (Number.isFinite(v)) return v;
+    const n = Number(String(m[1]).replace(/,/g, ""));
+    if (Number.isFinite(n)) return n;
   }
 
-  return NaN;
+  return 0;
 }
 
-async function fetchText(url) {
+async function fetchHtml(url) {
   try {
     const res = await fetch(url, { headers: IMGFLIP_HEADERS });
     if (!res.ok) return "";
     const text = await res.text();
+
     const head = text.slice(0, 4000).toLowerCase();
     if (head.includes("captcha") || head.includes("unusual traffic")) return "";
+
     return text;
   } catch {
     return "";
@@ -114,7 +101,9 @@ async function fetchText(url) {
 }
 
 function extractNextData(html) {
-  const match = html.match(/<script[^>]+id=["']__NEXT_DATA__["'][^>]*>([\s\S]*?)<\/script>/);
+  const match = html.match(
+    /<script[^>]+id=["']__NEXT_DATA__["'][^>]*>([\s\S]*?)<\/script>/
+  );
   if (!match) return null;
   try { return JSON.parse(match[1]); } catch { return null; }
 }
@@ -125,6 +114,7 @@ function extractImageFromNext(next) {
     next?.props?.pageProps?.data?.image ||
     next?.props?.pageProps?.props?.image ||
     null;
+
   return img && typeof img === "object" ? img : null;
 }
 
@@ -135,6 +125,7 @@ function coerceViews(imageObj) {
     imageObj.view_count,
     imageObj.viewCount
   ];
+
   for (const c of candidates) {
     const n = Number(c);
     if (Number.isFinite(n)) return n;
@@ -142,38 +133,15 @@ function coerceViews(imageObj) {
   return NaN;
 }
 
-// JSONL helpers
-async function readJsonLines(path) {
-  try {
-    const raw = await fs.readFile(path, "utf8");
-    return raw
-      .split(/\r?\n/)
-      .map(l => l.trim())
-      .filter(Boolean)
-      .map(l => safeParseJsonLine(l))
-      .filter(Boolean);
-  } catch (e) {
-    if (e && e.code === "ENOENT") return [];
-    throw e;
-  }
+function csvEscape(v) {
+  const s = String(v ?? "");
+  if (/[",\r\n]/.test(s)) return `"${s.replace(/"/g, '""')}"`;
+  return s;
 }
 
-function safeParseJsonLine(line) {
-  const normalized = line
-    .replace(/\t+/g, " ")
-    .replace(/[“”]/g, '"')
-    .replace(/\bTRUE\b/g, "true")
-    .replace(/\bFALSE\b/g, "false")
-    .replace(/,\s*$/, "");
-  try { return JSON.parse(normalized); } catch { return null; }
+function sleep(ms) {
+  return new Promise(r => setTimeout(r, ms));
 }
-
-async function writeJsonLines(path, items) {
-  const lines = items.map(x => JSON.stringify(x));
-  await fs.writeFile(path, lines.join("\n") + "\n", "utf8");
-}
-
-function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 
 main().catch(err => {
   console.error(err);
