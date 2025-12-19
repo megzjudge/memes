@@ -1,11 +1,3 @@
-// script.js
-// Single-file, client-side app:
-// - Renders Imgflip icons row
-// - Loads /memes.csv (static metadata) + /meme_daily_updates.csv (views)
-// - Provides filters + sorting
-// - Adds frequency-weighted font sizing + color weighting for Meme Type + Keywords filter buttons
-
-// ------------ Imgflip icons (top of page) ------------
 
 const IMGFLIP_PROFILE_URL = "https://imgflip.com/user/mbtininja";
 
@@ -21,8 +13,8 @@ const IMGFLIP_ICONS = [
   { id: 9, file: "images/icon_9.svg", label: "8k" },
   { id: 10, file: "images/icon_10.svg", label: "10k" },
   { id: 11, file: "images/icon_11.svg", label: "15k" },
-  { id: 12, file: "images/icon_12.svg", label: "20k" }, // current
-  { id: 13, file: "images/icon_13.svg", label: "30k" } // goal
+  { id: 12, file: "images/icon_12.svg", label: "20k" },
+  { id: 13, file: "images/icon_13.svg", label: "30k" }
 ];
 
 const IMGFLIP_MAX_OWNED_ICON_ID = 12;
@@ -90,15 +82,15 @@ function setupImgflipIcons() {
 
 // ------------ Meme feed + filters + sort ------------
 
-const STATIC_FILE = "/memes.csv"; // CSV 10 columns
-const DAILY_FILE = "/meme_daily_updates.csv"; // CSV 3 columns: id, urls, views
+const STATIC_FILE = "/memes.csv";
+const DAILY_FILE = "/meme_daily_updates.csv";
 
 let sections = [];
 const currentFilters = { type: "all", meme: "all", keywords: "all" };
 
 let sortState = {
-  mode: "age", // "age" | "views"
-  ageDirection: "newest" // "newest" | "oldest"
+  mode: "age",
+  ageDirection: "newest"
 };
 
 const MBTI_TYPES = [
@@ -142,7 +134,7 @@ async function fetchFeed() {
     fetchTextOrThrow(DAILY_FILE)
   ]);
 
-  const staticRows = parseCsv(staticText, ","); // headers required
+  const staticRows = parseCsv(staticText, ",");
   const dailyRows = parseCsv(dailyText, ",");
 
   // Views map: id -> views
@@ -180,8 +172,6 @@ async function fetchTextOrThrow(path) {
 }
 
 function csvRowToMemeItem(r) {
-  // memes.csv headers (yours are uppercase but parser lowercases them):
-  // id, urls, image_url, is_gif, title, meme_type, kym_slug, mbti_types, keywords, tags
 
   const id = String(r.id || r.meme_id || r.image_id || "").trim();
   if (!id) return null;
@@ -549,8 +539,26 @@ function initFilters() {
 
   const typeOptions = new Set();
 
-  const memeCounts = new Map();    // meme_type -> count
-  const keywordCounts = new Map(); // keyword -> count
+  const memeCounts = new Map();
+  const keywordCounts = new Map();
+
+  const hasAnyMbti = sections.some(s => {
+    const secVal = (s.dataset.type || "").toUpperCase().trim();
+    const secTypes = secVal
+      .split(/[\s,]+/)
+      .map(t => t.trim())
+      .filter(Boolean);
+    return secTypes.some(t => MBTI_SET.has(t));
+  });
+
+  const hasNonMbti = sections.some(s => {
+    const secVal = (s.dataset.type || "").toUpperCase().trim();
+    const secTypes = secVal
+      .split(/[\s,]+/)
+      .map(t => t.trim())
+      .filter(Boolean);
+    return !secTypes.some(t => MBTI_SET.has(t));
+  });
 
   sections.forEach(section => {
     const typeStr = (section.dataset.type || "").trim();
@@ -581,26 +589,10 @@ function initFilters() {
 
   MBTI_TYPES.forEach(t => typeOptions.add(t));
 
-  if (sections.some(s => (s.dataset.type || "").toUpperCase().includes("NON-MBTI"))) {
-    typeOptions.add("NON-MBTI");
-  }
-
-  if (sections.some(s => {
-    const secVal = (s.dataset.type || "").toUpperCase().trim();
-    const secTypes = secVal
-      .split(/[\s,]+/)
-      .map(t => t.trim())
-      .filter(Boolean);
-    return secTypes.some(t => MBTI_SET.has(t));
-  })) {
-    typeOptions.add("ANY-MBTI");
-  }
-
-  const typeValues = Array.from(typeOptions);
   const orderedTypeValues = [
-    ...(typeValues.includes("ANY-MBTI") ? ["ANY-MBTI"] : []),
-    ...MBTI_TYPES,
-    ...(typeValues.includes("NON-MBTI") ? ["NON-MBTI"] : [])
+    ...(hasAnyMbti ? ["ANY-MBTI"] : []),
+    ...(hasNonMbti ? ["NON-MBTI"] : []),
+    ...MBTI_TYPES
   ];
 
   buildFilterButtons(typeButtonsContainer, orderedTypeValues, "type");
@@ -657,7 +649,6 @@ function buildFilterButtons(container, values, filterType, countsMap) {
       btn.style.fontSize = `${size}rem`;
       btn.title = `${btn.textContent} (${count})`;
 
-      // CHANGED: base color is now the SMALLEST color; higher frequency => darker
       const { bg, border } = colorForCountFromMinMax(count, minC, maxC);
       btn.style.backgroundColor = bg;
       btn.style.borderColor = border;
@@ -764,8 +755,8 @@ function displayType(upper) {
 // ---- sizing + color weighting helpers ----
 
 function scaleFontSizeFromMinMax(count, minC, maxC) {
-  const MIN = 0.80; // rem
-  const MAX = 1.15; // rem
+  const MIN = 0.80;
+  const MAX = 1.15;
 
   if (!Number.isFinite(minC) || !Number.isFinite(maxC) || minC === maxC) {
     return (MIN + MAX) / 2;
@@ -778,9 +769,6 @@ function scaleFontSizeFromMinMax(count, minC, maxC) {
   return MIN + clamp01(t) * (MAX - MIN);
 }
 
-// CHANGED mapping:
-// - count == min => BASE (#5e3b83)
-// - count increases => darker
 function colorForCountFromMinMax(count, minC, maxC) {
   const BASE = "#5e3b83";
 
@@ -790,11 +778,10 @@ function colorForCountFromMinMax(count, minC, maxC) {
 
   const logMin = Math.log(minC + 1);
   const logMax = Math.log(maxC + 1);
-  const t = (Math.log(count + 1) - logMin) / (logMax - logMin); // 0..1
+  const t = (Math.log(count + 1) - logMin) / (logMax - logMin);
   const x = clamp01(t);
 
-  // x=0 => BASE, x=1 => darker
-  const shade = -0.50 * x; // 0 down to -0.50
+  const shade = -0.50 * x;
 
   const bg = shadeColor(BASE, shade);
   const border = shadeColor(BASE, shade - 0.18);
@@ -841,7 +828,6 @@ function rgbToHex(r, g, b) {
   return `#${to(r)}${to(g)}${to(b)}`;
 }
 
-// Backward-compatible function (kept so nothing breaks if referenced elsewhere)
 function scaleFontSize(count, countsMap) {
   if (!(countsMap instanceof Map)) return 1.0;
 
