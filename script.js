@@ -1,5 +1,3 @@
-// script.js
-
 // ------------ Imgflip icons (top of page) ------------
 
 const IMGFLIP_PROFILE_URL = "https://imgflip.com/user/mbtininja";
@@ -20,9 +18,7 @@ const IMGFLIP_ICONS = [
   { id: 13, file: "images/icon_13.svg", label: "30k" }  // goal
 ];
 
-// how many icons you currently own
 const IMGFLIP_MAX_OWNED_ICON_ID = 12;
-// which one is currently selected on Imgflip
 const IMGFLIP_CURRENT_ICON_ID = 12;
 
 function setupImgflipIcons() {
@@ -87,7 +83,8 @@ function setupImgflipIcons() {
 
 // ------------ Meme feed + filters + sort ------------
 
-const FEED_BASE = "https://rapid-math-6088.touch-97a.workers.dev";
+const STATIC_FILE = "/memes.csv";                // JSONL
+const DAILY_FILE  = "/meme_daily_updates.csv";   // JSONL
 
 let sections = [];
 const currentFilters = {
@@ -134,19 +131,70 @@ async function bootstrap() {
   initFilters();
 }
 
-// ---------- fetch feed ----------
+// ---------- fetch feed (from Pages files) ----------
 
 async function fetchFeed() {
-  const url = `${FEED_BASE}/feed`;
-  console.log("Fetching feed from", url);
-  const t0 = performance.now();
-  const res = await fetch(url, { headers: { accept: "application/json" } });
-  if (!res.ok) throw new Error(`Feed HTTP ${res.status}`);
-  const json = await res.json();
-  const items = Array.isArray(json.items) ? json.items : [];
-  const t1 = performance.now();
-  console.log(`Got ${items.length} items in ${Math.round(t1 - t0)}ms`);
-  return items;
+  const [staticText, dailyText] = await Promise.all([
+    fetchTextOrThrow(STATIC_FILE),
+    fetchTextOrThrow(DAILY_FILE)
+  ]);
+
+  const staticItems = parseJsonLines(staticText);
+  const dailyItems = parseJsonLines(dailyText);
+
+  const dailyMap = new Map();
+  dailyItems.forEach(d => {
+    const id = d && d.id ? String(d.id).trim() : "";
+    if (!id) return;
+    dailyMap.set(id, d);
+  });
+
+  const merged = staticItems.map(s => {
+    const id = s && s.id ? String(s.id).trim() : "";
+    const d = id ? dailyMap.get(id) : null;
+
+    const views = d && Number.isFinite(Number(d.views))
+      ? Number(d.views)
+      : 0;
+
+    return {
+      ...s,
+      views
+    };
+  });
+
+  console.log(`Loaded ${merged.length} items from CSV files`);
+  return merged;
+}
+
+async function fetchTextOrThrow(path) {
+  const res = await fetch(path, { headers: { accept: "text/plain" } });
+  if (!res.ok) throw new Error(`${path} HTTP ${res.status}`);
+  return res.text();
+}
+
+function parseJsonLines(text) {
+  return String(text)
+    .split(/\r?\n/)
+    .map(l => l.trim())
+    .filter(Boolean)
+    .map(l => safeParseJsonLine(l))
+    .filter(Boolean);
+}
+
+function safeParseJsonLine(line) {
+  // tolerate common copy/paste artifacts
+  const normalized = String(line)
+    .replace(/\t+/g, " ")
+    .replace(/[“”]/g, '"')
+    .replace(/\bTRUE\b/g, "true")
+    .replace(/\bFALSE\b/g, "false")
+    .replace(/,\s*$/, "");
+  try {
+    return JSON.parse(normalized);
+  } catch {
+    return null;
+  }
 }
 
 // ---------- rendering ----------
@@ -177,6 +225,7 @@ function renderSections(items) {
     const memeType = String(rawMemeType);
     const memeLower = memeType.toLowerCase();
 
+    // keywords come from item.keywords; if missing, fall back to tags
     const rawKeywords = Array.isArray(item.keywords)
       ? item.keywords
       : Array.isArray(item.tags)
@@ -187,8 +236,10 @@ function renderSections(items) {
       .map(k => String(k).toLowerCase().trim())
       .filter(Boolean);
 
+    // remove MBTI tokens
     keywordsArr = keywordsArr.filter(kw => !MBTI_SET.has(kw.toUpperCase()));
 
+    // ensure "memes" tag exists if present in source
     const hasMemesTag = rawKeywords.some(
       k => String(k).toLowerCase().trim() === "memes"
     );
@@ -202,15 +253,12 @@ function renderSections(items) {
     section.dataset.meme = memeLower;
     section.dataset.keywords = keywordsStr;
 
-    // Stable-ish age sorting:
-    // Worker now provides created_ts when available (best), otherwise we fall back to idx.
+    // Age sorting uses created_ts when available, else fallback to idx
     const ts = Number(item && item.created_ts);
-    if (Number.isFinite(ts) && ts > 0) {
-      section.dataset.ts = String(ts);
-    }
-    section.dataset.index = String(idx); // fallback
+    if (Number.isFinite(ts) && ts > 0) section.dataset.ts = String(ts);
+    section.dataset.index = String(idx);
 
-    const views = typeof item.views === "number" ? item.views : 0;
+    const views = Number.isFinite(Number(item.views)) ? Number(item.views) : 0;
     section.dataset.views = String(views);
 
     const titleRaw = item.title || item.id || "Untitled";
@@ -224,6 +272,7 @@ function renderSections(items) {
       ? String(item.image_url)
       : (item && item.id ? `https://i.imgflip.com/${item.id}.jpg` : "");
 
+    // You are leaving KYM blank in data; so keep icon hidden unless a URL exists.
     const kymUrlRaw = (item && item.kym_url) ? String(item.kym_url).trim() : "";
     const hasKymUrl = !!kymUrlRaw;
 
@@ -239,7 +288,7 @@ function renderSections(items) {
               </a>
               ${
                 hasKymUrl
-                  ? `<a href="${FEED_BASE}/kym?url=${encodeURIComponent(kymUrlRaw)}&name=${encodeURIComponent(memeType)}" target="_blank" rel="noopener" title="Open on Know Your Meme">
+                  ? `<a href="${kymUrlRaw}" target="_blank" rel="noopener" title="Open on Know Your Meme">
                       <img src="images/Know_Your_Meme.svg" alt="Know Your Meme">
                     </a>`
                   : ""
@@ -268,19 +317,11 @@ function renderSections(items) {
         });
 
       if (memeLower) {
-        chipData.push({
-          type: "meme",
-          value: memeLower,
-          label: memeType
-        });
+        chipData.push({ type: "meme", value: memeLower, label: memeType });
       }
 
       keywordsArr.forEach(kw => {
-        chipData.push({
-          type: "keywords",
-          value: kw,
-          label: kw
-        });
+        chipData.push({ type: "keywords", value: kw, label: kw });
       });
 
       const seen = new Set();
@@ -387,7 +428,6 @@ function applySort() {
       return idxA - idxB;
     }
 
-    // Age sort: prefer ts if present; else fallback to server order (idx)
     const tsA = Number(a.dataset.ts);
     const tsB = Number(b.dataset.ts);
     const hasTsA = Number.isFinite(tsA);
@@ -479,7 +519,6 @@ function initFilters() {
     typeOptions.add("ANY-MBTI");
   }
 
-  // Order type filters: Any MBTI -> 16 types -> Non-MBTI (if present)
   const typeValues = Array.from(typeOptions);
   const orderedTypeValues = [
     ...(typeValues.includes("ANY-MBTI") ? ["ANY-MBTI"] : []),
