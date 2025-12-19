@@ -295,14 +295,14 @@ a {
 }
 
 .section-buttons button[data-filter-type="meme"] {
-    background-color: #4a2c72;
-    border-color: #4a2c72;
+    background-color: #7847B8;
+    border-color: #7847B8;
     color: #e0d7f7;
 }
 
 .section-buttons button[data-filter-type="keywords"] {
-    background-color: #331f50;
-    border-color: #331f50;
+    background-color: #4a2c72;
+    border-color: #4a2c72;
     color: #e0d7f7;
 }
 
