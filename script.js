@@ -1,4 +1,3 @@
-
 // ------------ Imgflip icons (top of page) ------------
 
 const IMGFLIP_PROFILE_URL = "https://imgflip.com/user/mbtininja";
