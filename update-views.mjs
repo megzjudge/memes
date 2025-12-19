@@ -26,7 +26,7 @@ async function main() {
   const ids = staticRows
     .map(r => ({
       id: String(r.id || r.meme_id || r.image_id || r["column 1"] || "").trim(),
-      url: String(r.url || r.page_url || r.link || "").trim()
+      url: String(r.url || r.urls || r.page_url || r.link || "").trim()
     }))
     .filter(x => x.id);
 

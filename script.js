@@ -185,7 +185,7 @@ function csvRowToMemeItem(r) {
   const id = String(r.id || r.meme_id || r.image_id || "").trim();
   if (!id) return null;
 
-  const page_url = String(r.url || "").trim() || `https://imgflip.com/i/${id}`;
+  const page_url = String(r.url || r.urls || "").trim() || `https://imgflip.com/i/${id}`;
   const image_url = String(r.image_url || "").trim() || `https://i.imgflip.com/${id}.jpg`;
 
   const is_gif = parseBool(r.is_gif);
@@ -372,7 +372,11 @@ function renderSections(items) {
         <div class="title-row">
           <h3>${title}</h3>
           <div class="meta-row" style="display:flex;align-items:center;justify-content:space-between;gap:8px;">
-            <span class="view-count">${views ? escapeHtml(numberWithCommas(views) + " views") : ""}</span>
+            <span class="view-count">${
+              Number.isFinite(views) && views > 0
+                ? escapeHtml(numberWithCommas(views) + " views")
+                : "Views pending"
+            }</span>
             <p class="image-links" style="display:flex;align-items:center;gap:8px;margin:0;">
               <a href="${pageUrl}" target="_blank" rel="noopener" title="Open on Imgflip">
                 <img src="images/imgflip.svg" alt="Imgflip link">
