@@ -537,12 +537,18 @@ footer a:hover {
     }
 
     .section-buttons button.chip-meme {
-        background-color: #f1e8ff;
-        border-color: #d9c7ff;
+        background-color: #63469A;
+        border-color: #63469A;
+        color: #e0d7f7;
+    }
+
+    .section-buttons button.chip-meme:hover {
+        background-color: #7052AD;
+        border-color: #7052AD;
     }
 
     .image-container {
-        padding: 0.5rem 0; /* Adjusted for mobile */
+        padding: 0.5rem 0;
     }
 
     .image-container img {
