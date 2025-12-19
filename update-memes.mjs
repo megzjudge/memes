@@ -39,39 +39,33 @@ async function main() {
   }
 
   const header = [
-    "id",
-    "url",
-    "image_url",
-    "is_gif",
-    "title",
-    "meme_type",
-    "kym_slug",
-    "mbti_types",
-    "keywords",
-    "tags"
+    "ID","URL","IMAGE_URL","IS_GIF","TITLE","MEME_TYPE","KYM_SLUG",
+    "MBTI_TYPES","KEYWORDS","TAGS"
   ];
 
-  const rows = [header];
+  const rows = items.map(it => {
+    const mbtiCell = (it.mbti_types || []).join(", ");
+    const kwCell   = (it.keywords || []).join(", ");
+    const tagCell  = (it.tags || []).join(", ");
 
-  for (const it of items) {
-    rows.push([
-      it.id,
-      it.url,
-      it.image_url,
-      String(Boolean(it.is_gif)),
-      it.title,
-      it.meme_type,
-      it.kym_slug,
-      JSON.stringify(Array.isArray(it.mbti_types) ? it.mbti_types : []),
-      JSON.stringify(Array.isArray(it.keywords) ? it.keywords : []),
-      JSON.stringify(Array.isArray(it.tags) ? it.tags : [])
-    ]);
-  }
+    return [
+      it.id || "",
+      it.page_url || "",
+      it.image_url || "",
+      it.is_gif ? "true" : "false",
+      it.title || "",
+      it.meme_type || "",
+      it.kym_slug || "",
+      mbtiCell,
+      kwCell,
+      tagCell
+    ].map(csvEscape).join(",");
+  });
 
-  const csv = rows.map(r => r.map(csvEscape).join(",")).join("\n") + "\n";
-  await fs.writeFile(OUT_FILE, csv, "utf8");
+  const out = [header.join(","), ...rows].join("\n") + "\n";
+  await fs.writeFile(OUT_FILE, out, "utf8");
 
-  console.log(`Wrote ${items.length} rows to ${OUT_FILE}`);
+  console.log(`Wrote ${items.length} items to ${OUT_FILE}`);
 }
 
 function collectIdsFromListingHtml(html) {
@@ -214,6 +208,15 @@ function toTitleCase(s) {
     .split(/\s+/)
     .map(w => (w ? w[0].toUpperCase() + w.slice(1) : w))
     .join(" ");
+}
+
+function csvEscape(value) {
+  const s = String(value ?? "");
+  // Quote if it contains comma, quote, or newline
+  if (/[",\n\r]/.test(s)) {
+    return `"${s.replace(/"/g, '""')}"`;
+  }
+  return s;
 }
 
 main().catch(err => {

@@ -142,7 +142,7 @@ async function fetchFeed() {
 
   const dailyMap = new Map();
   for (const r of dailyRows) {
-    const id = String(r.id || "").trim();
+    const id = String(r.id || r.meme_id || r.image_id || "").trim();
     if (!id) continue;
 
     const viewsNum = Number(String(r.views ?? "").trim());
@@ -183,7 +183,7 @@ function csvRowToMemeItem(r) {
   // memes.csv columns:
   // id,url,image_url,is_gif,title,meme_type,kym_slug,mbti_types,keywords,tags
 
-  const id = String(r.id || "").trim();
+  const id = String(r.id || r.meme_id || r.image_id || "").trim();
   if (!id) return null;
 
   const page_url = String(r.url || "").trim() || `https://imgflip.com/i/${id}`;
@@ -219,14 +219,22 @@ function parseBool(v) {
 }
 
 function parseJsonArrayCell(v) {
-  const s = String(v ?? "").trim();
+  let s = String(v ?? "").trim();
   if (!s) return [];
+
+  // Defensive: strip outer quotes if they somehow remain
+  if (s.startsWith('"') && s.endsWith('"') && s.length >= 2) {
+    s = s.slice(1, -1).trim();
+  }
+
   try {
     const parsed = JSON.parse(s);
     return Array.isArray(parsed) ? parsed : [];
   } catch {
-    // allow plain comma-separated fallback
-    return s.split(",").map(x => x.trim()).filter(Boolean);
+    return s
+      .split(",")
+      .map(x => x.trim())
+      .filter(Boolean);
   }
 }
 
@@ -240,7 +248,12 @@ function parseCsv(text, delimiter = ",") {
 
   if (lines.length < 2) return [];
 
-  const headers = splitCsvLine(lines[0], delimiter).map(h => h.trim().toLowerCase());
+  const headers = splitCsvLine(lines[0], delimiter).map((h, idx) => {
+    let hh = String(h ?? "");
+    if (idx === 0) hh = hh.replace(/^\uFEFF/, ""); // strip UTF-8 BOM
+    return hh.trim().toLowerCase();
+  });
+
   const out = [];
 
   for (let i = 1; i < lines.length; i++) {
