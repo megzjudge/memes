@@ -250,7 +250,7 @@ function parseCsv(text, delimiter = ",") {
 
   const headers = splitCsvLine(lines[0], delimiter).map((h, idx) => {
     let hh = String(h ?? "");
-    if (idx === 0) hh = hh.replace(/^\uFEFF/, ""); // strip UTF-8 BOM
+    if (idx === 0) hh = hh.replace(/^\uFEFF/, "");
     return hh.trim().toLowerCase();
   });
 
