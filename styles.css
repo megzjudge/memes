@@ -531,18 +531,18 @@ footer a:hover {
         font-size: 0.8rem;
     }
 
-    .section-buttons button.chip-type {
+    .chip-type {
         background-color: #e0d7f7;
         border-color: #c1b3f0;
     }
 
-    .section-buttons button.chip-meme {
+    .chip-meme {
         background-color: #63469A;
         border-color: #63469A;
         color: #e0d7f7;
     }
 
-    .section-buttons button.chip-meme:hover {
+    .chip-meme:hover {
         background-color: #7052AD;
         border-color: #7052AD;
     }
