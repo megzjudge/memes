@@ -197,6 +197,9 @@ function safeParseJsonLine(line) {
   }
 }
 
+console.log("memes.csv first 200 chars:", staticText.slice(0, 200));
+console.log("meme_daily_updates.csv first 200 chars:", dailyText.slice(0, 200));
+
 // ---------- rendering ----------
 
 function showEmpty(msg) {
