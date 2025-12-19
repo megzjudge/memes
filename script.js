@@ -1,9 +1,3 @@
-// script.js
-// Single-file, client-side app:
-// - Renders Imgflip icons row
-// - Loads /memes.csv (static metadata) + /meme_daily_updates.csv (views)
-// - Provides filters + sorting
-// - Adds frequency-weighted font sizing + color weighting for Meme Type + Keywords filter buttons
 
 // ------------ Imgflip icons (top of page) ------------
 
