@@ -289,14 +289,14 @@ a {
 }
 
 .section-buttons button[data-filter-type="type"] {
-    background-color: #7847B8;
-    border-color: #7847B8;
+    background-color: #A989D1;
+    border-color: #A989D1;
     color: #e0d7f7;
 }
 
 .section-buttons button[data-filter-type="meme"] {
-    background-color: #623B97;
-    border-color: #623B97;
+    background-color: #9068C4;
+    border-color: #9068C4;
     color: #e0d7f7;
 }
 
