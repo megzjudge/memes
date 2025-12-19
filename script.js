@@ -165,6 +165,12 @@ async function fetchFeed() {
   return merged;
 }
 
+console.log("STATIC HEADERS:", staticRows[0] ? Object.keys(staticRows[0]) : "no rows");
+console.log("STATIC SAMPLE ROW:", staticRows[0]);
+
+console.log("DAILY HEADERS:", dailyRows[0] ? Object.keys(dailyRows[0]) : "no rows");
+console.log("DAILY SAMPLE ROW:", dailyRows[0]);
+
 async function fetchTextOrThrow(path) {
   const res = await fetch(path, { headers: { accept: "text/plain" } });
   const ct = res.headers.get("content-type") || "";
