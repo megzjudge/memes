@@ -1,3 +1,5 @@
+console.log("JS BOOT: file loaded", new Date().toISOString());
+
 const STATIC_FILE = "/memes.csv";               // JSONL (one JSON object per line)
 const DAILY_FILE  = "/meme_daily_updates.csv";  // CSV: id,page_url,views
 
