@@ -140,6 +140,11 @@ async function fetchFeed() {
   const staticRows = parseCsv(staticText, ","); // headers required
   const dailyRows = parseCsv(dailyText, ",");
 
+  console.log("STATIC HEADERS:", staticRows[0] ? Object.keys(staticRows[0]) : "no rows");
+  console.log("STATIC SAMPLE ROW:", staticRows[0]);
+  console.log("DAILY HEADERS:", dailyRows[0] ? Object.keys(dailyRows[0]) : "no rows");
+  console.log("DAILY SAMPLE ROW:", dailyRows[0]);
+
   const dailyMap = new Map();
   for (const r of dailyRows) {
     const id = String(r.id || r.meme_id || r.image_id || "").trim();
@@ -164,12 +169,6 @@ async function fetchFeed() {
 
   return merged;
 }
-
-console.log("STATIC HEADERS:", staticRows[0] ? Object.keys(staticRows[0]) : "no rows");
-console.log("STATIC SAMPLE ROW:", staticRows[0]);
-
-console.log("DAILY HEADERS:", dailyRows[0] ? Object.keys(dailyRows[0]) : "no rows");
-console.log("DAILY SAMPLE ROW:", dailyRows[0]);
 
 async function fetchTextOrThrow(path) {
   const res = await fetch(path, { headers: { accept: "text/plain" } });
