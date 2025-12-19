@@ -468,6 +468,17 @@ function initFilters() {
     typeOptions.add("NON-MBTI");
   }
 
+  if (sections.some(s => {
+    const secVal = (s.dataset.type || "").toUpperCase().trim();
+    const secTypes = secVal
+      .split(/[\s,]+/)
+      .map(t => t.trim())
+      .filter(Boolean);
+    return secTypes.some(t => MBTI_SET.has(t));
+  })) {
+    typeOptions.add("ANY-MBTI");
+  }
+
   buildFilterButtons(typeButtonsContainer, Array.from(typeOptions).sort(), "type");
   buildFilterButtons(memeButtonsContainer, Array.from(memeOptions).sort(), "meme");
   buildFilterButtons(keywordButtonsContainer, Array.from(keywordOptions).sort(), "keywords");
@@ -539,6 +550,8 @@ function filterSections(filterType, value) {
 
         if (fVal === "NON-MBTI") {
           matches = !secTypes.some(t => MBTI_SET.has(t));
+        } else if (fVal === "ANY-MBTI") {
+          matches = secTypes.some(t => MBTI_SET.has(t));
         } else {
           matches = secTypes.includes(fVal);
         }
@@ -596,5 +609,6 @@ function toTitleCase(s) {
 
 function displayType(upper) {
   if (upper === "NON-MBTI") return "Non-MBTI";
+  if (upper === "ANY-MBTI") return "Any MBTI";
   return upper;
 }
