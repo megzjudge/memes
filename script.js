@@ -382,6 +382,12 @@ function renderSections(items) {
 
     const viewLabel = views > 0 ? `${numberWithCommas(views)} views` : "Views pending";
 
+    const imageBlock = buildImageContainerHtml({
+      imageUrl,
+      title,
+      isGif: !!item.is_gif
+    });
+
     section.innerHTML = `
       <div class="info-box">
         <div class="title-row">
@@ -397,8 +403,7 @@ function renderSections(items) {
         </div>
         <div class="section-buttons"></div>
       </div>
-      <div class="image-container">
-        <img src="${imageUrl}" alt="${title} Meme" loading="lazy">
+      ${imageBlock}
       </div>
     `;
 
@@ -440,6 +445,11 @@ function renderSections(items) {
         btn.addEventListener("click", () => filterSections(d.type, d.value));
         buttonsContainer.appendChild(btn);
       });
+    }
+
+    const imgContainer = section.querySelector(".image-container");
+    if (imgContainer) {
+      wireImageLoader(imgContainer, { isGif: !!item.is_gif });
     }
 
     frag.appendChild(section);
@@ -849,7 +859,92 @@ function filterSections(filterType, value) {
   });
 }
 
-// ---------- helpers ----------
+// ---------- helpers ---------- //
+
+function buildImageContainerHtml({ imageUrl, title, isGif }) {
+  const kindLabel = isGif ? "GIF" : "image";
+
+  return `
+    <div class="image-container" data-kind="${isGif ? "gif" : "img"}">
+      <div class="img-loader" aria-live="polite" aria-busy="true">
+        <div class="img-loader-spinner"></div>
+        <div class="img-loader-text">Loading ${kindLabel}…</div>
+      </div>
+
+      <button class="img-retry" type="button" style="display:none;">
+        Failed to load. Click to retry.
+      </button>
+
+      <img
+        src="${imageUrl}"
+        alt="${title} Meme"
+        loading="lazy"
+        decoding="async"
+        style="opacity:0;"
+      >
+    </div>
+  `;
+}
+
+function wireImageLoader(container, { isGif }) {
+  const img = container.querySelector("img");
+  const loader = container.querySelector(".img-loader");
+  const retryBtn = container.querySelector(".img-retry");
+  if (!img || !loader || !retryBtn) return;
+
+  let timeoutId = null;
+
+  const showLoader = () => {
+    loader.style.display = "flex";
+    loader.setAttribute("aria-busy", "true");
+    retryBtn.style.display = "none";
+  };
+
+  const showImage = () => {
+    if (timeoutId) clearTimeout(timeoutId);
+    loader.style.display = "none";
+    loader.setAttribute("aria-busy", "false");
+    retryBtn.style.display = "none";
+    img.style.opacity = "1";
+  };
+
+  const showError = () => {
+    if (timeoutId) clearTimeout(timeoutId);
+    loader.style.display = "none";
+    loader.setAttribute("aria-busy", "false");
+    img.style.opacity = "0";
+    retryBtn.style.display = "inline-flex";
+  };
+
+  const retry = () => {
+    showLoader();
+    img.style.opacity = "0";
+
+    const url = new URL(img.src, window.location.href);
+    url.searchParams.set("_retry", String(Date.now()));
+    img.src = url.toString();
+
+    if (isGif) {
+      if (timeoutId) clearTimeout(timeoutId);
+      timeoutId = setTimeout(() => showError(), 15000);
+    }
+  };
+
+  img.addEventListener("load", showImage);
+  img.addEventListener("error", showError);
+  retryBtn.addEventListener("click", retry);
+
+  showLoader();
+
+  if (img.complete && img.naturalWidth > 0) {
+    showImage();
+    return;
+  }
+
+  if (isGif) {
+    timeoutId = setTimeout(() => showError(), 15000);
+  }
+}
 
 function escapeHtml(s) {
   return String(s).replace(/&(amp|lt|gt|quot|#39);/g, c => {
