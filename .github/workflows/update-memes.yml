@@ -2,7 +2,7 @@ name: Update memes.csv (daily)
 
 on:
   schedule:
-    - cron: "13 0 * * *" # daily at 17:00 UTC
+    - cron: "13 0 * * *" # daily at 09:00 UTC
   workflow_dispatch: {}
 
 permissions:

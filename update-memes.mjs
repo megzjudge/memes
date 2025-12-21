@@ -29,11 +29,11 @@ const MEME_TYPE_EXCLUDE = new Set([
 
 async function main() {
   const html = await fetchText(LIST_URL);
-  const ids = collectIdsFromListingHtml(html).slice(0, MAX_ITEMS);
+  const entries = collectIdsFromListingHtml(html).slice(0, MAX_ITEMS);
 
   const items = [];
-  for (const id of ids) {
-    const item = await fetchAndParseItem(id);
+  for (const { id, ext } of entries) {
+    const item = await fetchAndParseItem(id, ext);
     if (item) items.push(item);
     await sleep(REQUEST_DELAY_MS);
   }
@@ -50,7 +50,7 @@ async function main() {
 
     return [
       it.id || "",
-      it.page_url || "",
+      it.url || "",
       it.image_url || "",
       it.is_gif ? "true" : "false",
       it.title || "",
@@ -71,27 +71,28 @@ async function main() {
 function collectIdsFromListingHtml(html) {
   if (!html) return [];
   const seen = new Set();
-  const ids = [];
+  const out = [];
 
-  const imgRegex = /(?:https?:)?\/\/i\.imgflip\.com\/([A-Za-z0-9]+)\.(?:jpg|png|gif|webp)/g;
+  const imgRegex = /(?:https?:)?\/\/i\.imgflip\.com\/([A-Za-z0-9]+)\.(jpg|gif)/gi;
   let m;
   while ((m = imgRegex.exec(html))) {
     const id = m[1];
+    const ext = (m[2] || "").toLowerCase();
     if (!id || seen.has(id)) continue;
     seen.add(id);
-    ids.push(id);
+    out.push({ id, ext });
   }
-  return ids;
+  return out;
 }
 
-async function fetchAndParseItem(id) {
+async function fetchAndParseItem(id, extFromList) {
   const pageUrl = `https://imgflip.com/i/${id}`;
   const html = await fetchText(pageUrl);
-  if (!html) return minimalItem(id);
+  if (!html) return minimalItem(id, extFromList);
 
   const next = extractNextData(html);
   const image = extractImageFromNext(next);
-  if (!image) return minimalItem(id);
+  if (!image) return minimalItem(id, extFromList);
 
   return parseFromJson(image, id, pageUrl);
 }
@@ -169,12 +170,15 @@ function parseFromJson(obj, id, pageUrl) {
   return item;
 }
 
-function minimalItem(id) {
+function minimalItem(id, extFromList) {
+  const ext = (extFromList || "").toLowerCase();
+  const isGif = ext === "gif";
+
   return {
     id,
     url: `https://imgflip.com/i/${id}`,
-    image_url: `https://i.imgflip.com/${id}.jpg`,
-    is_gif: false,
+    image_url: "",
+    is_gif: isGif,
     title: id,
     meme_type: "",
     kym_slug: "",
@@ -208,15 +212,6 @@ function toTitleCase(s) {
     .split(/\s+/)
     .map(w => (w ? w[0].toUpperCase() + w.slice(1) : w))
     .join(" ");
-}
-
-function csvEscape(value) {
-  const s = String(value ?? "");
-  // Quote if it contains comma, quote, or newline
-  if (/[",\n\r]/.test(s)) {
-    return `"${s.replace(/"/g, '""')}"`;
-  }
-  return s;
 }
 
 main().catch(err => {
