@@ -886,64 +886,106 @@ function buildImageContainerHtml({ imageUrl, title, isGif }) {
   `;
 }
 
+const IMG_LOADER_DEBUG = true;
+
 function wireImageLoader(container, { isGif }) {
   const img = container.querySelector("img");
   const loader = container.querySelector(".img-loader");
   const retryBtn = container.querySelector(".img-retry");
-  if (!img || !loader || !retryBtn) return;
+
+  if (!img || !loader || !retryBtn) {
+    if (IMG_LOADER_DEBUG) {
+      console.warn("[img-loader] missing elements", {
+        hasImg: !!img,
+        hasLoader: !!loader,
+        hasRetry: !!retryBtn
+      });
+    }
+    return;
+  }
+
+  const src0 = img.currentSrc || img.src;
+  const kind = isGif ? "gif" : "img";
+  const id = `img-${Math.random().toString(16).slice(2, 8)}`;
+  container.dataset.loaderId = id;
 
   let timeoutId = null;
+  let settled = false;
 
-  const showLoader = () => {
+  const log = (...args) => {
+    if (!IMG_LOADER_DEBUG) return;
+    console.log(`[img-loader:${id}:${kind}]`, ...args);
+  };
+
+  const showLoader = (why) => {
     loader.style.display = "flex";
     loader.setAttribute("aria-busy", "true");
     retryBtn.style.display = "none";
+    log("loader ON", why || "", { src: img.currentSrc || img.src });
   };
 
-  const showImage = () => {
+  const showImage = (why) => {
+    if (settled) return;
+    settled = true;
     if (timeoutId) clearTimeout(timeoutId);
     loader.style.display = "none";
     loader.setAttribute("aria-busy", "false");
     retryBtn.style.display = "none";
     img.style.opacity = "1";
+    log("IMAGE visible", why || "", {
+      src: img.currentSrc || img.src,
+      natural: `${img.naturalWidth}x${img.naturalHeight}`
+    });
   };
 
-  const showError = () => {
+  const showError = (why, err) => {
+    if (settled) return;
+    settled = true;
     if (timeoutId) clearTimeout(timeoutId);
     loader.style.display = "none";
     loader.setAttribute("aria-busy", "false");
     img.style.opacity = "0";
     retryBtn.style.display = "inline-flex";
+    log("ERROR", why || "", { src: img.currentSrc || img.src, err: err || null });
+  };
+
+  const armTimeout = () => {
+    if (!isGif) return;
+    if (timeoutId) clearTimeout(timeoutId);
+    timeoutId = setTimeout(() => {
+      showError("timeout(15000ms)");
+    }, 15000);
+    log("timeout armed (15000ms)");
   };
 
   const retry = () => {
-    showLoader();
-    img.style.opacity = "0";
+    // Reset state for another attempt
+    settled = false;
+    showLoader("retry-click");
 
+    // Force reload
     const url = new URL(img.src, window.location.href);
     url.searchParams.set("_retry", String(Date.now()));
     img.src = url.toString();
 
-    if (isGif) {
-      if (timeoutId) clearTimeout(timeoutId);
-      timeoutId = setTimeout(() => showError(), 15000);
-    }
+    armTimeout();
   };
 
-  img.addEventListener("load", showImage);
-  img.addEventListener("error", showError);
+  img.addEventListener("load", () => showImage("img.load"));
+  img.addEventListener("error", (e) => showError("img.error", e));
   retryBtn.addEventListener("click", retry);
 
-  showLoader();
+  // Start in loading state
+  showLoader("init");
+  log("wired", { initialSrc: src0 });
 
+  // If cached and already complete
   if (img.complete && img.naturalWidth > 0) {
-    showImage();
+    showImage("img.complete-cache");
     return;
   }
 
-  if (isGif) {
-    timeoutId = setTimeout(() => showError(), 15000);
-  }
+  armTimeout();
 }
 
 function escapeHtml(s) {
