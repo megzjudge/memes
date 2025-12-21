@@ -643,13 +643,6 @@ function buildFilterButtons(container, values, filterType, countsMap) {
 
   container.innerHTML = "";
 
-  const allBtn = document.createElement("button");
-  allBtn.textContent = "All";
-  allBtn.dataset.filterType = filterType;
-  allBtn.dataset.value = "all";
-  allBtn.addEventListener("click", () => filterSections(filterType, "all"));
-  container.appendChild(allBtn);
-
   let minC = Infinity;
   let maxC = -Infinity;
   if (countsMap instanceof Map) {
@@ -676,9 +669,18 @@ function buildFilterButtons(container, values, filterType, countsMap) {
 
   let expanded = defaultExpanded;
 
+  // One wrap that contains: All + first 10 + (More/Less) + the rest
   const buttonsWrap = document.createElement("div");
   buttonsWrap.className = "filter-buttons-wrap";
   container.appendChild(buttonsWrap);
+
+  // --- All button (INLINE) ---
+  const allBtn = document.createElement("button");
+  allBtn.textContent = "All";
+  allBtn.dataset.filterType = filterType;
+  allBtn.dataset.value = "all";
+  allBtn.addEventListener("click", () => filterSections(filterType, "all"));
+  buttonsWrap.appendChild(allBtn);
 
   let toggleBtn = null;
 
@@ -695,9 +697,9 @@ function buildFilterButtons(container, values, filterType, countsMap) {
       buttonsWrap.querySelectorAll(`button[data-filter-type="${filterType}"]`)
     );
 
-    // Note: btns includes the toggle button too, so we mark extras explicitly
     btns.forEach(b => {
       if (b.classList.contains("filter-more-btn")) return;
+      if (b.dataset.value === "all") return;
 
       const idx = Number(b.dataset.freqIndex || 0);
       if (idx >= FILTER_PREVIEW_LIMIT) {
@@ -738,7 +740,7 @@ function buildFilterButtons(container, values, filterType, countsMap) {
       btn.style.borderColor = border;
     }
 
-    // If we're collapsing, hide extras by default (unless expanded)
+    // Default hidden state for extras
     if (shouldCollapse && idx >= FILTER_PREVIEW_LIMIT && !expanded) {
       btn.style.display = "none";
       btn.dataset.collapsed = "true";
@@ -746,16 +748,11 @@ function buildFilterButtons(container, values, filterType, countsMap) {
 
     btn.addEventListener("click", () => filterSections(filterType, btn.dataset.value));
 
-    // Append the first 10
-    if (!shouldCollapse || idx < FILTER_PREVIEW_LIMIT) {
-      buttonsWrap.appendChild(btn);
-    } else {
-      // Append extras later (after toggle is inserted) to keep toggle at slot 11
-      btn.dataset.isExtra = "true";
-      buttonsWrap.appendChild(btn);
-    }
+    // Append the button in order
+    buttonsWrap.appendChild(btn);
 
-    // Insert the toggle button exactly once, immediately after the 10th item (index 9)
+    // Insert toggle button immediately after the first 10 items (index 9),
+    // so it is always the "11th slot" (after All + 10 values, it will be next).
     if (shouldCollapse && idx === FILTER_PREVIEW_LIMIT - 1) {
       toggleBtn = document.createElement("button");
       toggleBtn.type = "button";
@@ -773,7 +770,7 @@ function buildFilterButtons(container, values, filterType, countsMap) {
     }
   });
 
-  // Initialize collapse state (in case we defaultExpanded=true)
+  // Initialize collapse state (handles defaultExpanded=true)
   applyCollapseState();
   updateToggleLabel();
 }
