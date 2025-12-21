@@ -139,6 +139,29 @@ async function fetchFeed() {
   const staticRows = parseCsv(staticText, ",");
   const dailyRows = parseCsv(dailyText, ",");
 
+  // --- NEW: fill-down kym_slug when meme_type repeats from prior row ---
+  let lastMemeType = "";
+  let lastKymSlug = "";
+  for (const r of staticRows) {
+    const memeType = String(r.meme_type || r.meme_tag || "").trim().toLowerCase();
+    const kym = String(r.kym_slug || "").trim();
+
+    if (memeType && memeType === lastMemeType) {
+      // Only fill if missing
+      if (!kym && lastKymSlug) {
+        r.kym_slug = lastKymSlug;
+      }
+    } else {
+      lastMemeType = memeType;
+    }
+
+    // Update lastKymSlug if this row has one (so it can be used by subsequent repeats)
+    if (String(r.kym_slug || "").trim()) {
+      lastKymSlug = String(r.kym_slug).trim();
+    }
+  }
+  // --- END NEW ---
+
   // Views map: id -> views
   const dailyMap = new Map();
   for (const r of dailyRows) {
