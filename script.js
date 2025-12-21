@@ -451,7 +451,10 @@ function renderSections(items) {
 
     const imgContainer = section.querySelector(".image-container");
     if (imgContainer) {
-      wireImageLoader(imgContainer, { isGif: !!item.is_gif });
+      wireImageLoader(imgContainer, {
+        isGif: !!item.is_gif,
+        pageUrl
+      });
     }
 
     frag.appendChild(section);
@@ -863,6 +866,51 @@ function filterSections(filterType, value) {
 
 // ---------- helpers ---------- //
 
+const IMGFLIP_OG_IMAGE_CACHE = new Map();
+
+async function resolveImgflipOgImage(pageUrl) {
+  const url = String(pageUrl || "").trim();
+  if (!url) return null;
+
+  if (IMGFLIP_OG_IMAGE_CACHE.has(url)) {
+    return IMGFLIP_OG_IMAGE_CACHE.get(url);
+  }
+
+  try {
+    const res = await fetch(url, { headers: { accept: "text/html" } });
+    if (!res.ok) {
+      IMGFLIP_OG_IMAGE_CACHE.set(url, null);
+      return null;
+    }
+
+    const html = await res.text();
+
+    const og = html.match(
+      /<meta\s+property=["']og:image["']\s+content=["']([^"']+)["']/i
+    );
+    if (og && og[1]) {
+      const imgUrl = og[1].trim();
+      IMGFLIP_OG_IMAGE_CACHE.set(url, imgUrl);
+      return imgUrl;
+    }
+
+    const tw = html.match(
+      /<meta\s+name=["']twitter:image["']\s+content=["']([^"']+)["']/i
+    );
+    if (tw && tw[1]) {
+      const imgUrl = tw[1].trim();
+      IMGFLIP_OG_IMAGE_CACHE.set(url, imgUrl);
+      return imgUrl;
+    }
+
+    IMGFLIP_OG_IMAGE_CACHE.set(url, null);
+    return null;
+  } catch {
+    IMGFLIP_OG_IMAGE_CACHE.set(url, null);
+    return null;
+  }
+}
+
 function buildImageContainerHtml({ imageUrl, title, isGif }) {
   const kindLabel = isGif ? "GIF" : "image";
 
@@ -890,7 +938,7 @@ function buildImageContainerHtml({ imageUrl, title, isGif }) {
 
 const IMG_LOADER_DEBUG = true;
 
-function wireImageLoader(container, { isGif }) {
+function wireImageLoader(container, { isGif, pageUrl }) {
   const img = container.querySelector("img");
   const loader = container.querySelector(".img-loader");
   const retryBtn = container.querySelector(".img-retry");
@@ -906,12 +954,12 @@ function wireImageLoader(container, { isGif }) {
     return;
   }
 
-  const src0 = img.currentSrc || img.src;
   const kind = isGif ? "gif" : "img";
   const id = `img-${Math.random().toString(16).slice(2, 8)}`;
   container.dataset.loaderId = id;
 
   let timeoutId = null;
+  let resolving = false;
   let settled = false;
 
   const log = (...args) => {
@@ -923,7 +971,8 @@ function wireImageLoader(container, { isGif }) {
     loader.style.display = "flex";
     loader.setAttribute("aria-busy", "true");
     retryBtn.style.display = "none";
-    log("loader ON", why || "", { src: img.currentSrc || img.src });
+    img.style.opacity = "0";
+    log("loader ON", why || "", { src: img.currentSrc || img.src, pageUrl });
   };
 
   const showImage = (why) => {
@@ -940,7 +989,7 @@ function wireImageLoader(container, { isGif }) {
     });
   };
 
-  const showError = (why, err) => {
+  const showErrorUi = (why) => {
     if (settled) return;
     settled = true;
     if (timeoutId) clearTimeout(timeoutId);
@@ -948,40 +997,62 @@ function wireImageLoader(container, { isGif }) {
     loader.setAttribute("aria-busy", "false");
     img.style.opacity = "0";
     retryBtn.style.display = "inline-flex";
-    log("ERROR", why || "", { src: img.currentSrc || img.src, err: err || null });
+    log("ERROR", why || "", { src: img.currentSrc || img.src, pageUrl });
   };
 
   const armTimeout = () => {
     if (!isGif) return;
     if (timeoutId) clearTimeout(timeoutId);
     timeoutId = setTimeout(() => {
-      showError("timeout(15000ms)");
+      showErrorUi("timeout(15000ms)");
     }, 15000);
     log("timeout armed (15000ms)");
   };
 
-  const retry = () => {
-    // Reset state for another attempt
+  const hardReloadImg = (newSrc, why) => {
     settled = false;
-    showLoader("retry-click");
+    showLoader(why);
 
-    // Force reload
-    const url = new URL(img.src, window.location.href);
+    const url = new URL(newSrc, window.location.href);
     url.searchParams.set("_retry", String(Date.now()));
     img.src = url.toString();
 
     armTimeout();
   };
 
+  const retry = () => {
+    hardReloadImg(img.src, "retry-click");
+  };
+
   img.addEventListener("load", () => showImage("img.load"));
-  img.addEventListener("error", (e) => showError("img.error", e));
+
+  img.addEventListener("error", async () => {
+    log("img.error", { src: img.currentSrc || img.src });
+
+    // Prevent loops / concurrent resolves
+    if (resolving) return;
+    resolving = true;
+
+    // Attempt to resolve the real image URL from the Imgflip page (og:image)
+    const resolved = await resolveImgflipOgImage(pageUrl);
+
+    if (resolved && resolved !== (img.currentSrc || img.src)) {
+      log("resolved og:image", resolved);
+      resolving = false;
+      hardReloadImg(resolved, "fallback-og:image");
+      return;
+    }
+
+    resolving = false;
+    showErrorUi("img.error-no-fallback");
+  });
+
   retryBtn.addEventListener("click", retry);
 
-  // Start in loading state
+  // init
   showLoader("init");
-  log("wired", { initialSrc: src0 });
 
-  // If cached and already complete
+  // cached success
   if (img.complete && img.naturalWidth > 0) {
     showImage("img.complete-cache");
     return;
