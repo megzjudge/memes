@@ -668,7 +668,6 @@ function buildFilterButtons(container, values, filterType, countsMap) {
     Array.isArray(values) &&
     values.length > FILTER_PREVIEW_LIMIT;
 
-  // If a currently-selected value lives in the "extra" set, default to expanded so it doesn't disappear.
   const selected = currentFilters[filterType];
   const defaultExpanded =
     shouldCollapse &&
@@ -681,11 +680,39 @@ function buildFilterButtons(container, values, filterType, countsMap) {
   buttonsWrap.className = "filter-buttons-wrap";
   container.appendChild(buttonsWrap);
 
+  let toggleBtn = null;
+
+  const updateToggleLabel = () => {
+    if (!toggleBtn) return;
+    toggleBtn.textContent = expanded ? "Less" : "More";
+    toggleBtn.setAttribute("aria-expanded", expanded ? "true" : "false");
+  };
+
+  const applyCollapseState = () => {
+    if (!shouldCollapse) return;
+
+    const btns = Array.from(
+      buttonsWrap.querySelectorAll(`button[data-filter-type="${filterType}"]`)
+    );
+
+    // Note: btns includes the toggle button too, so we mark extras explicitly
+    btns.forEach(b => {
+      if (b.classList.contains("filter-more-btn")) return;
+
+      const idx = Number(b.dataset.freqIndex || 0);
+      if (idx >= FILTER_PREVIEW_LIMIT) {
+        b.style.display = expanded ? "" : "none";
+        b.dataset.collapsed = expanded ? "false" : "true";
+      }
+    });
+  };
+
   values.forEach((val, idx) => {
     if (!val || typeof val !== "string") return;
 
     const btn = document.createElement("button");
     btn.dataset.filterType = filterType;
+    btn.dataset.freqIndex = String(idx);
 
     if (filterType === "type") {
       const upper = val.toUpperCase();
@@ -711,47 +738,44 @@ function buildFilterButtons(container, values, filterType, countsMap) {
       btn.style.borderColor = border;
     }
 
+    // If we're collapsing, hide extras by default (unless expanded)
     if (shouldCollapse && idx >= FILTER_PREVIEW_LIMIT && !expanded) {
       btn.style.display = "none";
       btn.dataset.collapsed = "true";
     }
 
     btn.addEventListener("click", () => filterSections(filterType, btn.dataset.value));
-    buttonsWrap.appendChild(btn);
+
+    // Append the first 10
+    if (!shouldCollapse || idx < FILTER_PREVIEW_LIMIT) {
+      buttonsWrap.appendChild(btn);
+    } else {
+      // Append extras later (after toggle is inserted) to keep toggle at slot 11
+      btn.dataset.isExtra = "true";
+      buttonsWrap.appendChild(btn);
+    }
+
+    // Insert the toggle button exactly once, immediately after the 10th item (index 9)
+    if (shouldCollapse && idx === FILTER_PREVIEW_LIMIT - 1) {
+      toggleBtn = document.createElement("button");
+      toggleBtn.type = "button";
+      toggleBtn.className = "filter-more-btn";
+      toggleBtn.dataset.filterType = filterType;
+
+      toggleBtn.addEventListener("click", () => {
+        expanded = !expanded;
+        applyCollapseState();
+        updateToggleLabel();
+      });
+
+      buttonsWrap.appendChild(toggleBtn);
+      updateToggleLabel();
+    }
   });
 
-  if (shouldCollapse) {
-    const toggleBtn = document.createElement("button");
-    toggleBtn.type = "button";
-    toggleBtn.className = "filter-more-btn";
-    toggleBtn.dataset.filterType = filterType;
-
-    const updateToggleLabel = () => {
-      toggleBtn.textContent = expanded ? "Less" : "More";
-      toggleBtn.setAttribute("aria-expanded", expanded ? "true" : "false");
-    };
-
-    const applyCollapseState = () => {
-      const btns = Array.from(buttonsWrap.querySelectorAll(`button[data-filter-type="${filterType}"]`));
-      btns.forEach((b, i) => {
-        if (i < FILTER_PREVIEW_LIMIT) return;
-        b.style.display = expanded ? "" : "none";
-        b.dataset.collapsed = expanded ? "false" : "true";
-      });
-    };
-
-    toggleBtn.addEventListener("click", () => {
-      expanded = !expanded;
-      applyCollapseState();
-      updateToggleLabel();
-    });
-
-    // Initialize state
-    applyCollapseState();
-    updateToggleLabel();
-
-    container.appendChild(toggleBtn);
-  }
+  // Initialize collapse state (in case we defaultExpanded=true)
+  applyCollapseState();
+  updateToggleLabel();
 }
 
 function filterSections(filterType, value) {
