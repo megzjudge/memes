@@ -1,4 +1,3 @@
-
 const IMGFLIP_PROFILE_URL = "https://imgflip.com/user/mbtininja";
 
 const IMGFLIP_ICONS = [
@@ -101,6 +100,9 @@ const MBTI_TYPES = [
 ];
 const MBTI_SET = new Set(MBTI_TYPES);
 
+// Controls how many freq-ranked filter buttons are shown before collapsing behind "More"
+const FILTER_PREVIEW_LIMIT = 10;
+
 document.addEventListener("DOMContentLoaded", () => {
   console.log(
     "Script loaded at",
@@ -172,7 +174,6 @@ async function fetchTextOrThrow(path) {
 }
 
 function csvRowToMemeItem(r) {
-
   const id = String(r.id || r.meme_id || r.image_id || "").trim();
   if (!id) return null;
 
@@ -595,9 +596,23 @@ function initFilters() {
     ...MBTI_TYPES
   ];
 
+  const orderedMemeValues = sortValuesByFrequency(memeCounts);
+  const orderedKeywordValues = sortValuesByFrequency(keywordCounts);
+
   buildFilterButtons(typeButtonsContainer, orderedTypeValues, "type");
-  buildFilterButtons(memeButtonsContainer, Array.from(memeCounts.keys()).sort(), "meme", memeCounts);
-  buildFilterButtons(keywordButtonsContainer, Array.from(keywordCounts.keys()).sort(), "keywords", keywordCounts);
+  buildFilterButtons(memeButtonsContainer, orderedMemeValues, "meme", memeCounts);
+  buildFilterButtons(keywordButtonsContainer, orderedKeywordValues, "keywords", keywordCounts);
+}
+
+function sortValuesByFrequency(countsMap) {
+  if (!(countsMap instanceof Map)) return [];
+  return Array.from(countsMap.entries())
+    .sort((a, b) => {
+      const c = (b[1] || 0) - (a[1] || 0);
+      if (c !== 0) return c;
+      return String(a[0]).localeCompare(String(b[0]));
+    })
+    .map(([k]) => k);
 }
 
 function buildFilterButtons(container, values, filterType, countsMap) {
@@ -625,8 +640,27 @@ function buildFilterButtons(container, values, filterType, countsMap) {
     }
   }
 
-  values.forEach(val => {
+  const shouldCollapse =
+    countsMap instanceof Map &&
+    Array.isArray(values) &&
+    values.length > FILTER_PREVIEW_LIMIT;
+
+  // If a currently-selected value lives in the "extra" set, default to expanded so it doesn't disappear.
+  const selected = currentFilters[filterType];
+  const defaultExpanded =
+    shouldCollapse &&
+    selected !== "all" &&
+    values.slice(FILTER_PREVIEW_LIMIT).includes(selected);
+
+  let expanded = defaultExpanded;
+
+  const buttonsWrap = document.createElement("div");
+  buttonsWrap.className = "filter-buttons-wrap";
+  container.appendChild(buttonsWrap);
+
+  values.forEach((val, idx) => {
     if (!val || typeof val !== "string") return;
+
     const btn = document.createElement("button");
     btn.dataset.filterType = filterType;
 
@@ -654,9 +688,47 @@ function buildFilterButtons(container, values, filterType, countsMap) {
       btn.style.borderColor = border;
     }
 
+    if (shouldCollapse && idx >= FILTER_PREVIEW_LIMIT && !expanded) {
+      btn.style.display = "none";
+      btn.dataset.collapsed = "true";
+    }
+
     btn.addEventListener("click", () => filterSections(filterType, btn.dataset.value));
-    container.appendChild(btn);
+    buttonsWrap.appendChild(btn);
   });
+
+  if (shouldCollapse) {
+    const toggleBtn = document.createElement("button");
+    toggleBtn.type = "button";
+    toggleBtn.className = "filter-more-btn";
+    toggleBtn.dataset.filterType = filterType;
+
+    const updateToggleLabel = () => {
+      toggleBtn.textContent = expanded ? "Less" : "More";
+      toggleBtn.setAttribute("aria-expanded", expanded ? "true" : "false");
+    };
+
+    const applyCollapseState = () => {
+      const btns = Array.from(buttonsWrap.querySelectorAll(`button[data-filter-type="${filterType}"]`));
+      btns.forEach((b, i) => {
+        if (i < FILTER_PREVIEW_LIMIT) return;
+        b.style.display = expanded ? "" : "none";
+        b.dataset.collapsed = expanded ? "false" : "true";
+      });
+    };
+
+    toggleBtn.addEventListener("click", () => {
+      expanded = !expanded;
+      applyCollapseState();
+      updateToggleLabel();
+    });
+
+    // Initialize state
+    applyCollapseState();
+    updateToggleLabel();
+
+    container.appendChild(toggleBtn);
+  }
 }
 
 function filterSections(filterType, value) {
@@ -675,6 +747,23 @@ function filterSections(filterType, value) {
       btn.classList.toggle("active", isActive);
       btn.setAttribute("aria-pressed", isActive ? "true" : "false");
     });
+
+  // If the selected filter button is currently collapsed behind "More",
+  // auto-expand so the active state remains visible.
+  const activeVal = currentFilters[filterType];
+  if (activeVal !== "all") {
+    const btn = document.querySelector(
+      `.filter-container button[data-filter-type="${filterType}"][data-value="${cssEscape(activeVal)}"]`
+    );
+    if (btn && btn.dataset.collapsed === "true") {
+      const moreBtn = document.querySelector(
+        `.filter-container button.filter-more-btn[data-filter-type="${filterType}"]`
+      );
+      if (moreBtn && moreBtn.getAttribute("aria-expanded") !== "true") {
+        moreBtn.click();
+      }
+    }
+  }
 
   sections.forEach(section => {
     let matches = true;
@@ -750,6 +839,13 @@ function displayType(upper) {
   if (upper === "NON-MBTI") return "Non-MBTI";
   if (upper === "ANY-MBTI") return "Any MBTI";
   return upper;
+}
+
+// Robust-ish attribute selector escaping for values that might include quotes/brackets/etc.
+function cssEscape(value) {
+  const s = String(value);
+  if (window.CSS && typeof window.CSS.escape === "function") return window.CSS.escape(s);
+  return s.replace(/["\\]/g, "\\$&");
 }
 
 // ---- sizing + color weighting helpers ----
