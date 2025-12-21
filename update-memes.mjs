@@ -7,6 +7,9 @@ const OUT_FILE = "memes.csv";
 const MAX_ITEMS = 200;
 const REQUEST_DELAY_MS = 175;
 
+// Refuse to overwrite a large existing file with a tiny scrape result
+const MIN_EXPECTED_ENTRIES_WHEN_EXISTING = 50;
+
 const IMGFLIP_HEADERS = {
   "User-Agent":
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
@@ -28,8 +31,18 @@ const MEME_TYPE_EXCLUDE = new Set([
 ]);
 
 async function main() {
+  // 1) Load existing file (if present) so we only add/merge, never wipe out
+  const existingMap = await readExistingCsvMap(OUT_FILE);
+
   const html = await fetchText(LIST_URL);
   const entries = collectIdsFromListingHtml(html).slice(0, MAX_ITEMS);
+
+  // Safety: if we already have a file and suddenly scrape very few items, do not overwrite.
+  if (existingMap.size > 0 && entries.length < MIN_EXPECTED_ENTRIES_WHEN_EXISTING) {
+    throw new Error(
+      `Sanity check failed: only ${entries.length} entries found, but existing ${OUT_FILE} has ${existingMap.size} rows. Refusing to overwrite.`
+    );
+  }
 
   const items = [];
   for (const { id, ext } of entries) {
@@ -38,12 +51,45 @@ async function main() {
     await sleep(REQUEST_DELAY_MS);
   }
 
+  // 2) Merge: new items first, then existing items not already included
+  const merged = [];
+  const seen = new Set();
+
+  for (const it of items) {
+    if (!it?.id) continue;
+    const id = String(it.id).trim();
+    if (!id || seen.has(id)) continue;
+    seen.add(id);
+    merged.push(it);
+  }
+
+  // Convert existing CSV rows back to the same object shape you write out
+  for (const [id, r] of existingMap.entries()) {
+    if (seen.has(id)) continue;
+
+    merged.push({
+      id,
+      url: String(r.URL ?? r.url ?? "").trim() || `https://imgflip.com/i/${id}`,
+      image_url: String(r.IMAGE_URL ?? r.image_url ?? "").trim(),
+      is_gif: String(r.IS_GIF ?? r.is_gif ?? "").trim().toLowerCase() === "true",
+      title: String(r.TITLE ?? r.title ?? "").trim() || id,
+      meme_type: String(r.MEME_TYPE ?? r.meme_type ?? "").trim(),
+      kym_slug: String(r.KYM_SLUG ?? r.kym_slug ?? "").trim(),
+      mbti_types: splitCsvCell(r.MBTI_TYPES ?? r.mbti_types),
+      keywords: splitCsvCell(r.KEYWORDS ?? r.keywords),
+      tags: splitCsvCell(r.TAGS ?? r.tags)
+    });
+  }
+
+  // 3) Hard cap so file doesn't grow
+  const finalItems = merged.slice(0, MAX_ITEMS);
+
   const header = [
     "ID","URL","IMAGE_URL","IS_GIF","TITLE","MEME_TYPE","KYM_SLUG",
     "MBTI_TYPES","KEYWORDS","TAGS"
   ];
 
-  const rows = items.map(it => {
+  const rows = finalItems.map(it => {
     const mbtiCell = (it.mbti_types || []).join(", ");
     const kwCell   = (it.keywords || []).join(", ");
     const tagCell  = (it.tags || []).join(", ");
@@ -65,16 +111,29 @@ async function main() {
   const out = [header.join(","), ...rows].join("\n") + "\n";
   await fs.writeFile(OUT_FILE, out, "utf8");
 
-  console.log(`Wrote ${items.length} items to ${OUT_FILE}`);
+  const carried = Math.max(0, finalItems.length - items.length);
+  console.log(`Wrote ${finalItems.length} items to ${OUT_FILE} (fetched=${items.length}, carried_over=${carried})`);
 }
 
+// --- Listing extraction ---
+// Updated: prefer /i/<id> links (stable), then fall back to CDN jpg/gif matches.
 function collectIdsFromListingHtml(html) {
   if (!html) return [];
   const seen = new Set();
   const out = [];
 
-  const imgRegex = /(?:https?:)?\/\/i\.imgflip\.com\/([A-Za-z0-9]+)\.(jpg|gif)/gi;
+  // Primary: link-based extraction
+  const linkRegex = /href=["']\/i\/([A-Za-z0-9]+)["']/gi;
   let m;
+  while ((m = linkRegex.exec(html))) {
+    const id = m[1];
+    if (!id || seen.has(id)) continue;
+    seen.add(id);
+    out.push({ id, ext: "" });
+  }
+
+  // Fallback: CDN image URLs (jpg/gif)
+  const imgRegex = /(?:https?:)?\/\/i\.imgflip\.com\/([A-Za-z0-9]+)\.(jpg|gif)/gi;
   while ((m = imgRegex.exec(html))) {
     const id = m[1];
     const ext = (m[2] || "").toLowerCase();
@@ -82,6 +141,7 @@ function collectIdsFromListingHtml(html) {
     seen.add(id);
     out.push({ id, ext });
   }
+
   return out;
 }
 
@@ -189,13 +249,113 @@ function minimalItem(id, extFromList) {
 }
 
 async function fetchText(url) {
-  const res = await fetch(url, { headers: IMGFLIP_HEADERS });
-  if (!res.ok) return "";
-  const text = await res.text();
-  const head = text.slice(0, 4000).toLowerCase();
-  if (head.includes("captcha") || head.includes("unusual traffic")) return "";
-  return text;
+  try {
+    const res = await fetch(url, { headers: IMGFLIP_HEADERS });
+    if (!res.ok) return "";
+    const text = await res.text();
+    const head = text.slice(0, 4000).toLowerCase();
+    if (head.includes("captcha") || head.includes("unusual traffic")) return "";
+    return text;
+  } catch {
+    return "";
+  }
 }
+
+// --- Existing CSV merge helpers ---
+
+async function readExistingCsvMap(filePath) {
+  try {
+    const text = await fs.readFile(filePath, "utf8");
+    const rows = parseCsv(text, ",");
+    const map = new Map();
+    for (const r of rows) {
+      const id = String(pick(r, ["ID", "id"]) || "").trim();
+      if (!id) continue;
+      map.set(id, r);
+    }
+    return map;
+  } catch {
+    return new Map();
+  }
+}
+
+function parseCsv(text, delimiter) {
+  const lines = String(text)
+    .split(/\r?\n/)
+    .map(l => l.trim())
+    .filter(Boolean);
+
+  if (lines.length < 2) return [];
+
+  const headers = splitCsvLine(lines[0], delimiter).map((h, idx) => {
+    let hh = String(h || "");
+    if (idx === 0) hh = hh.replace(/^\uFEFF/, "");
+    return hh.trim();
+  });
+
+  const out = [];
+  for (let i = 1; i < lines.length; i++) {
+    const cols = splitCsvLine(lines[i], delimiter);
+    if (!cols.length) continue;
+
+    const row = {};
+    for (let j = 0; j < headers.length; j++) {
+      row[headers[j]] = cols[j] !== undefined ? cols[j] : "";
+    }
+    out.push(row);
+  }
+  return out;
+}
+
+function splitCsvLine(line, delimiter) {
+  const s = String(line);
+  const out = [];
+  let cur = "";
+  let inQuotes = false;
+
+  for (let i = 0; i < s.length; i++) {
+    const ch = s[i];
+
+    if (ch === '"') {
+      const next = s[i + 1];
+      if (inQuotes && next === '"') {
+        cur += '"';
+        i++;
+      } else {
+        inQuotes = !inQuotes;
+      }
+      continue;
+    }
+
+    if (!inQuotes && ch === delimiter) {
+      out.push(cur);
+      cur = "";
+      continue;
+    }
+
+    cur += ch;
+  }
+
+  out.push(cur);
+  return out.map(x => x.trim());
+}
+
+function pick(obj, keys) {
+  if (!obj) return "";
+  for (const k of keys) {
+    if (obj[k] !== undefined) return obj[k];
+  }
+  return "";
+}
+
+function splitCsvCell(v) {
+  return String(v ?? "")
+    .split(",")
+    .map(s => s.trim())
+    .filter(Boolean);
+}
+
+// --- misc ---
 
 function csvEscape(v) {
   const s = String(v ?? "");
