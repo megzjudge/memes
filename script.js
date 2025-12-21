@@ -201,7 +201,9 @@ function csvRowToMemeItem(r) {
   if (!id) return null;
 
   const page_url = String(r.urls || r.url || "").trim() || `https://imgflip.com/i/${id}`;
-  const image_url = String(r.image_url || "").trim() || `https://i.imgflip.com/${id}.jpg`;
+  const image_url =
+  String(r.image_url || "").trim() ||
+  `https://i.imgflip.com/${id}.${is_gif ? "gif" : "jpg"}`;
 
   const is_gif = parseBool(r.is_gif);
 
