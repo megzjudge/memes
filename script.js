@@ -201,11 +201,12 @@ function csvRowToMemeItem(r) {
   if (!id) return null;
 
   const page_url = String(r.urls || r.url || "").trim() || `https://imgflip.com/i/${id}`;
-  const image_url =
-  String(r.image_url || "").trim() ||
-  `https://i.imgflip.com/${id}.${is_gif ? "gif" : "jpg"}`;
 
   const is_gif = parseBool(r.is_gif);
+
+  const image_url =
+    String(r.image_url || "").trim() ||
+    `https://i.imgflip.com/${id}.${is_gif ? "gif" : "jpg"}`;
 
   const title = String(r.title || "").trim() || id;
   const meme_type = String(r.meme_type || "").trim();
@@ -938,41 +939,31 @@ function buildImageContainerHtml({ imageUrl, title, isGif }) {
 
 const IMG_LOADER_DEBUG = true;
 
-function wireImageLoader(container, { isGif, pageUrl }) {
+function wireImageLoader(container, { isGif }) {
   const img = container.querySelector("img");
   const loader = container.querySelector(".img-loader");
   const retryBtn = container.querySelector(".img-retry");
+  if (!img || !loader || !retryBtn) return;
 
-  if (!img || !loader || !retryBtn) {
-    if (IMG_LOADER_DEBUG) {
-      console.warn("[img-loader] missing elements", {
-        hasImg: !!img,
-        hasLoader: !!loader,
-        hasRetry: !!retryBtn
-      });
-    }
-    return;
-  }
-
-  const kind = isGif ? "gif" : "img";
   const id = `img-${Math.random().toString(16).slice(2, 8)}`;
-  container.dataset.loaderId = id;
+  const log = (...args) => IMG_LOADER_DEBUG && console.log(`[img-loader:${id}]`, ...args);
 
   let timeoutId = null;
-  let resolving = false;
   let settled = false;
 
-  const log = (...args) => {
-    if (!IMG_LOADER_DEBUG) return;
-    console.log(`[img-loader:${id}:${kind}]`, ...args);
-  };
+  // Only support jpg/gif swapping
+  const originalSrc = img.currentSrc || img.src;
+  const fallbackSrc = buildJpgGifFallback(originalSrc);
+
+  // Track which src attempts we’ve already made to avoid loops
+  const attempted = new Set();
 
   const showLoader = (why) => {
     loader.style.display = "flex";
     loader.setAttribute("aria-busy", "true");
     retryBtn.style.display = "none";
     img.style.opacity = "0";
-    log("loader ON", why || "", { src: img.currentSrc || img.src, pageUrl });
+    log("loader ON", why, { src: img.currentSrc || img.src });
   };
 
   const showImage = (why) => {
@@ -983,10 +974,7 @@ function wireImageLoader(container, { isGif, pageUrl }) {
     loader.setAttribute("aria-busy", "false");
     retryBtn.style.display = "none";
     img.style.opacity = "1";
-    log("IMAGE visible", why || "", {
-      src: img.currentSrc || img.src,
-      natural: `${img.naturalWidth}x${img.naturalHeight}`
-    });
+    log("IMAGE visible", why, { src: img.currentSrc || img.src });
   };
 
   const showErrorUi = (why) => {
@@ -997,68 +985,89 @@ function wireImageLoader(container, { isGif, pageUrl }) {
     loader.setAttribute("aria-busy", "false");
     img.style.opacity = "0";
     retryBtn.style.display = "inline-flex";
-    log("ERROR", why || "", { src: img.currentSrc || img.src, pageUrl });
+    log("ERROR", why, { src: img.currentSrc || img.src, fallbackSrc });
   };
 
   const armTimeout = () => {
+    // Timebox GIFs (and “gif-marked” items) to avoid endless spinner
     if (!isGif) return;
     if (timeoutId) clearTimeout(timeoutId);
-    timeoutId = setTimeout(() => {
-      showErrorUi("timeout(15000ms)");
-    }, 15000);
-    log("timeout armed (15000ms)");
+    timeoutId = setTimeout(() => onError("timeout(15000ms)"), 15000);
   };
 
-  const hardReloadImg = (newSrc, why) => {
-    settled = false;
+  const setSrcWithBust = (src, why) => {
     showLoader(why);
+    settled = false;
 
-    const url = new URL(newSrc, window.location.href);
-    url.searchParams.set("_retry", String(Date.now()));
-    img.src = url.toString();
+    const u = new URL(src, window.location.href);
+    u.searchParams.set("_retry", String(Date.now()));
+    img.src = u.toString();
 
     armTimeout();
   };
 
-  const retry = () => {
-    hardReloadImg(img.src, "retry-click");
-  };
+  const onError = (why) => {
+    const cur = stripRetry(img.currentSrc || img.src);
+    attempted.add(cur);
 
-  img.addEventListener("load", () => showImage("img.load"));
-
-  img.addEventListener("error", async () => {
-    log("img.error", { src: img.currentSrc || img.src });
-
-    // Prevent loops / concurrent resolves
-    if (resolving) return;
-    resolving = true;
-
-    // Attempt to resolve the real image URL from the Imgflip page (og:image)
-    const resolved = await resolveImgflipOgImage(pageUrl);
-
-    if (resolved && resolved !== (img.currentSrc || img.src)) {
-      log("resolved og:image", resolved);
-      resolving = false;
-      hardReloadImg(resolved, "fallback-og:image");
+    // Try the jpg<->gif fallback once, if available and not already attempted
+    if (fallbackSrc && !attempted.has(fallbackSrc)) {
+      log("trying fallback extension", { why, fallbackSrc });
+      setSrcWithBust(fallbackSrc, "fallback-extension");
       return;
     }
 
-    resolving = false;
-    showErrorUi("img.error-no-fallback");
-  });
+    showErrorUi(`img.error ${why}`);
+  };
 
-  retryBtn.addEventListener("click", retry);
+  img.addEventListener("load", () => showImage("img.load"));
+  img.addEventListener("error", () => onError("img.error"));
+
+  retryBtn.addEventListener("click", () => {
+    attempted.clear();
+    const start = stripRetry(originalSrc);
+    setSrcWithBust(start, "retry-click");
+  });
 
   // init
   showLoader("init");
+  armTimeout();
 
   // cached success
   if (img.complete && img.naturalWidth > 0) {
     showImage("img.complete-cache");
     return;
   }
+}
 
-  armTimeout();
+function buildJpgGifFallback(src) {
+  try {
+    const u = new URL(src, window.location.href);
+    if (u.hostname !== "i.imgflip.com") return null;
+
+    // Remove querystring for extension swap logic
+    const path = u.pathname;
+    const m = path.match(/^\/([^/]+)\.(jpg|jpeg|gif)$/i);
+    if (!m) return null;
+
+    const code = m[1];
+    const ext = m[2].toLowerCase();
+
+    if (ext === "gif") return `https://i.imgflip.com/${code}.jpg`;
+    return `https://i.imgflip.com/${code}.gif`;
+  } catch {
+    return null;
+  }
+}
+
+function stripRetry(src) {
+  try {
+    const u = new URL(src, window.location.href);
+    u.searchParams.delete("_retry");
+    return u.toString();
+  } catch {
+    return String(src);
+  }
 }
 
 function escapeHtml(s) {
