@@ -1,416 +1,482 @@
+#!/usr/bin/env node
+/**
+ * update-memes.mjs
+ *
+ * Behavior:
+ * - Reads memes.csv (if present)
+ * - Scrapes the Imgflip page for the current top 14 meme IDs
+ * - Compares those 14 IDs to the first 14 rows in memes.csv
+ * - If identical -> no change
+ * - If new IDs are present -> inserts only the missing ones at the top, keeping the other existing rows as-is
+ * - For newly inserted rows, fetches per-meme page data and fills IMAGE_URL / IS_GIF / TITLE (best-effort)
+ */
+
 import fs from "node:fs/promises";
+import path from "node:path";
+import process from "node:process";
 
-const USERNAME = "mbtininja";
-const LIST_URL = `https://imgflip.com/all/user-images/${USERNAME}?sort=latest`;
+const CSV_PATH = path.resolve(process.cwd(), "memes.csv");
 
-const OUT_FILE = "memes.csv";
+// Adjust if your “imgflip page” is something else (profile, tag page, etc).
+// This should be the page that shows the newest items you want to track.
+// Example: your user page, a tag page, a gallery page, etc.
+const IMGFLIP_LIST_PAGE = process.env.IMGFLIP_LIST_PAGE || "https://imgflip.com/";
 
-// You said: scan last 14 submissions only
-const SCAN_COUNT = 14;
+const TOP_N = 14;
 
-const REQUEST_DELAY_MS = 175;
+const CSV_HEADERS = [
+  "ID",
+  "URLS",
+  "IMAGE_URL",
+  "IS_GIF",
+  "TITLE",
+  "MEME_TYPE",
+  "KYM_SLUG",
+  "MBTI_TYPES",
+  "KEYWORDS",
+  "TAGS",
+];
 
-const IMGFLIP_HEADERS = {
-  "User-Agent":
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
-  Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-  "Accept-Language": "en-US,en;q=0.9",
-  Referer: `https://imgflip.com/user/${USERNAME}`
-};
-
-const MBTI_TYPES = new Set([
-  "ESTP","ISTP","ESFP","ISFP",
-  "ESTJ","ISTJ","ESFJ","ISFJ",
-  "ENFP","INFP","ENFJ","INFJ",
-  "ENTJ","INTJ","ENTP","INTP"
-]);
-
-const MEME_TYPE_EXCLUDE = new Set([
-  "mbti","myers briggs","myers-briggs","personality",
-  "meme","memes","fun","fun stream","psychology"
-]);
-
-async function main() {
-  // 1) Read existing CSV (if any)
-  const existing = await readExistingCsv(OUT_FILE);
-  const existingRows = existing.rows;            // array of row objects keyed by headers
-  const headers = existing.headers.length ? existing.headers : [
-    "ID","URL","IMAGE_URL","IS_GIF","TITLE","MEME_TYPE","KYM_SLUG","MBTI_TYPES","KEYWORDS","TAGS"
-  ];
-
-  // Figure out which header name we should write for the page URL column
-  const urlHeader =
-    headers.find(h => h === "URLS") ||
-    headers.find(h => h === "URL")  ||
-    "URL";
-
-  // Use existing boolean style if present (TRUE/FALSE vs true/false)
-  const boolStyleUpper = detectUpperBoolStyle(existingRows, "IS_GIF");
-
-  // Build lookup sets and the current top-14 from the CSV (by position)
-  const existingIdSet = new Set();
-  for (const r of existingRows) {
-    const id = String(r["ID"] ?? "").trim();
-    if (id) existingIdSet.add(id);
-  }
-
-  const csvTopIds = existingRows
-    .slice(0, SCAN_COUNT)
-    .map(r => String(r["ID"] ?? "").trim())
-    .filter(Boolean);
-
-  // 2) Scrape the 14 latest IDs from Imgflip listing
-  const listHtml = await fetchText(LIST_URL);
-  if (!listHtml) {
-    throw new Error("Failed to fetch Imgflip listing HTML (empty response).");
-  }
-
-  const listingIds = collectIdsFromListingHtml(listHtml)
-    .map(x => x.id)
-    .filter(Boolean)
-    .slice(0, SCAN_COUNT);
-
-  if (listingIds.length === 0) {
-    throw new Error("No IDs found on Imgflip listing page.");
-  }
-
-  // 3) If top-14 already match, do nothing
-  if (arraysEqual(csvTopIds, listingIds)) {
-    console.log(`Top ${SCAN_COUNT} IDs match. No CSV changes needed.`);
-    return;
-  }
-
-  // 4) Find new IDs (present in listing top-14, not anywhere in CSV)
-  const newIds = listingIds.filter(id => !existingIdSet.has(id));
-
-  // If nothing new, do nothing (covers re-ordering on Imgflip, etc.)
-  if (newIds.length === 0) {
-    console.log(
-      `Top ${SCAN_COUNT} IDs differ, but no new IDs found (reorder-only). No CSV changes needed.`
-    );
-    return;
-  }
-
-  // 5) Fetch+parse only the new IDs and create new rows
-  const newItems = [];
-  for (const id of newIds) {
-    const item = await fetchAndParseItem(id, "");
-    if (item) newItems.push(item);
-    await sleep(REQUEST_DELAY_MS);
-  }
-
-  // Convert parsed items into CSV row objects matching existing headers
-  const newRows = newItems.map(it => itemToRow(it, headers, urlHeader, boolStyleUpper));
-
-  // 6) Prepend new rows; leave existing rows untouched
-  const finalRows = [...newRows, ...existingRows];
-
-  // 7) Write out the CSV with the same headers (or default)
-  const out = writeCsv(headers, finalRows);
-  await fs.writeFile(OUT_FILE, out, "utf8");
-
-  console.log(`Prepended ${newRows.length} new row(s) to ${OUT_FILE}.`);
+function log(...args) {
+  console.log(...args);
 }
 
-// ----------------------- Listing extraction -----------------------
-// Prefer /i/<id> links (stable), then fallback to CDN jpg/gif matches.
-function collectIdsFromListingHtml(html) {
-  if (!html) return [];
-  const seen = new Set();
-  const out = [];
-
-  const linkRegex = /href=["']\/i\/([A-Za-z0-9]+)["']/gi;
-  let m;
-  while ((m = linkRegex.exec(html))) {
-    const id = m[1];
-    if (!id || seen.has(id)) continue;
-    seen.add(id);
-    out.push({ id, ext: "" });
-  }
-
-  const imgRegex = /(?:https?:)?\/\/i\.imgflip\.com\/([A-Za-z0-9]+)\.(jpg|gif)/gi;
-  while ((m = imgRegex.exec(html))) {
-    const id = m[1];
-    const ext = (m[2] || "").toLowerCase();
-    if (!id || seen.has(id)) continue;
-    seen.add(id);
-    out.push({ id, ext });
-  }
-
-  return out;
+function warn(...args) {
+  console.warn(...args);
 }
 
-// ----------------------- Item fetch/parse -----------------------
-
-async function fetchAndParseItem(id, extFromList) {
-  const pageUrl = `https://imgflip.com/i/${id}`;
-  const html = await fetchText(pageUrl);
-  if (!html) return minimalItem(id, extFromList);
-
-  const next = extractNextData(html);
-  const image = extractImageFromNext(next);
-  if (!image) return minimalItem(id, extFromList);
-
-  return parseFromJson(image, id, pageUrl);
+function die(msg) {
+  console.error(msg);
+  process.exit(1);
 }
 
-function extractNextData(html) {
-  const match = html.match(
-    /<script[^>]+id=["']__NEXT_DATA__["'][^>]*>([\s\S]*?)<\/script>/
-  );
-  if (!match) return null;
-  try { return JSON.parse(match[1]); } catch { return null; }
+function normalizeBool(v) {
+  if (typeof v === "boolean") return v ? "TRUE" : "FALSE";
+  const s = String(v ?? "").trim().toLowerCase();
+  if (s === "true" || s === "1" || s === "yes") return "TRUE";
+  return "FALSE";
 }
 
-function extractImageFromNext(next) {
-  const img =
-    next?.props?.pageProps?.image ||
-    next?.props?.pageProps?.data?.image ||
-    next?.props?.pageProps?.props?.image ||
-    null;
-  return img && typeof img === "object" ? img : null;
+function csvEscape(value) {
+  const s = String(value ?? "");
+  if (/[,"\n\r]/.test(s)) return `"${s.replace(/"/g, '""')}"`;
+  return s;
 }
 
-function parseFromJson(obj, id, pageUrl) {
-  const item = minimalItem(id);
-  item.url = pageUrl;
-
-  item.title = (obj.title && String(obj.title).trim()) ? String(obj.title).trim() : id;
-
-  const rawUrl = obj.url || obj.image_url || "";
-  if (rawUrl) {
-    const u = String(rawUrl).startsWith("//") ? "https:" + rawUrl : String(rawUrl);
-    item.image_url = u;
-    item.is_gif = u.toLowerCase().endsWith(".gif");
-  }
-
-  const tagsRaw = Array.isArray(obj.tags) ? obj.tags : [];
-  const tags = tagsRaw
-    .map(t => String(t).toLowerCase().trim())
-    .filter(Boolean);
-  item.tags = tags;
-
-  let memeType = "";
-  if (obj.template?.name) {
-    memeType = String(obj.template.name).replace(/ meme$/i, "").trim();
-  }
-  if (!memeType) {
-    for (const t of tags) {
-      const upper = t.toUpperCase();
-      if (MBTI_TYPES.has(upper)) continue;
-      if (MEME_TYPE_EXCLUDE.has(t)) continue;
-      memeType = t;
-      break;
-    }
-  }
-  item.meme_type = memeType ? toTitleCase(memeType) : "";
-
-  const mbti = [];
-  const keywords = [];
-  for (const t of tags) {
-    const upper = t.toUpperCase();
-    if (MBTI_TYPES.has(upper)) {
-      mbti.push(upper);
-      continue;
-    }
-    if (item.meme_type && t === item.meme_type.toLowerCase()) continue;
-    keywords.push(t);
-  }
-
-  item.mbti_types = unique(mbti);
-  item.keywords = unique(keywords);
-
-  // keep blank as requested
-  item.kym_slug = "";
-
-  return item;
+function csvLine(fields) {
+  return fields.map(csvEscape).join(",");
 }
 
-function minimalItem(id, extFromList) {
-  const ext = (extFromList || "").toLowerCase();
-  const isGif = ext === "gif";
-
-  return {
-    id,
-    url: `https://imgflip.com/i/${id}`,
-    image_url: "",
-    is_gif: isGif,
-    title: id,
-    meme_type: "",
-    kym_slug: "",
-    mbti_types: [],
-    keywords: [],
-    tags: []
-  };
-}
-
-async function fetchText(url) {
-  try {
-    const res = await fetch(url, { headers: IMGFLIP_HEADERS });
-    if (!res.ok) return "";
-    const text = await res.text();
-    const head = text.slice(0, 4000).toLowerCase();
-    if (head.includes("captcha") || head.includes("unusual traffic")) return "";
-    return text;
-  } catch {
-    return "";
-  }
-}
-
-// ----------------------- CSV read/write -----------------------
-
-async function readExistingCsv(filePath) {
-  try {
-    const text = await fs.readFile(filePath, "utf8");
-    const parsed = parseCsvKeepHeader(text, ",");
-    return parsed;
-  } catch {
-    return { headers: [], rows: [] };
-  }
-}
-
-function parseCsvKeepHeader(text, delimiter) {
-  const lines = String(text)
-    .split(/\r?\n/)
-    .filter(l => l.length > 0);
-
-  if (lines.length < 2) return { headers: [], rows: [] };
-
-  const headers = splitCsvLine(lines[0], delimiter).map((h, idx) => {
-    let hh = String(h || "");
-    if (idx === 0) hh = hh.replace(/^\uFEFF/, "");
-    return hh.trim();
-  });
-
+function parseCSV(text) {
+  // Simple CSV parser that handles quotes.
+  // Returns { headers: string[], rows: string[][] }
   const rows = [];
-  for (let i = 1; i < lines.length; i++) {
-    const cols = splitCsvLine(lines[i], delimiter);
-    if (!cols.length) continue;
-
-    const row = {};
-    for (let j = 0; j < headers.length; j++) {
-      row[headers[j]] = cols[j] !== undefined ? cols[j] : "";
-    }
-    rows.push(row);
-  }
-
-  return { headers, rows };
-}
-
-function splitCsvLine(line, delimiter) {
-  const s = String(line);
-  const out = [];
-  let cur = "";
+  let row = [];
+  let field = "";
   let inQuotes = false;
 
-  for (let i = 0; i < s.length; i++) {
-    const ch = s[i];
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
 
-    if (ch === '"') {
-      const next = s[i + 1];
-      if (inQuotes && next === '"') {
-        cur += '"';
-        i++;
+    if (inQuotes) {
+      if (c === '"') {
+        const next = text[i + 1];
+        if (next === '"') {
+          field += '"';
+          i++;
+        } else {
+          inQuotes = false;
+        }
       } else {
-        inQuotes = !inQuotes;
+        field += c;
       }
       continue;
     }
 
-    if (!inQuotes && ch === delimiter) {
-      out.push(cur);
-      cur = "";
+    if (c === '"') {
+      inQuotes = true;
       continue;
     }
 
-    cur += ch;
+    if (c === ",") {
+      row.push(field);
+      field = "";
+      continue;
+    }
+
+    if (c === "\n") {
+      row.push(field);
+      field = "";
+      rows.push(row);
+      row = [];
+      continue;
+    }
+
+    if (c === "\r") continue;
+
+    field += c;
   }
 
-  out.push(cur);
-  return out.map(x => x.trim());
-}
-
-function writeCsv(headers, rows) {
-  const headerLine = headers.map(csvEscape).join(",");
-  const lines = [headerLine];
-
-  for (const r of rows) {
-    const cols = headers.map(h => csvEscape(r?.[h] ?? ""));
-    lines.push(cols.join(","));
+  // flush last
+  if (field.length > 0 || row.length > 0) {
+    row.push(field);
+    rows.push(row);
   }
 
-  return lines.join("\n") + "\n";
+  if (rows.length === 0) return { headers: [], rows: [] };
+
+  const headers = rows[0].map((h) => String(h ?? "").trim());
+  const data = rows.slice(1).filter((r) => r.some((x) => String(x ?? "").trim() !== ""));
+  return { headers, rows: data };
 }
 
-function itemToRow(item, headers, urlHeader, boolStyleUpper) {
-  const boolStr = (b) => {
-    const v = b ? "true" : "false";
-    return boolStyleUpper ? v.toUpperCase() : v;
+function toRowObject(headers, row) {
+  const obj = {};
+  for (let i = 0; i < headers.length; i++) obj[headers[i]] = row[i] ?? "";
+  return obj;
+}
+
+function fromRowObject(headers, obj) {
+  return headers.map((h) => obj[h] ?? "");
+}
+
+function unique(arr) {
+  return [...new Set(arr)];
+}
+
+function isBotBlockHtml(html) {
+  const h = html.toLowerCase();
+  return (
+    h.includes("checking your browser") ||
+    h.includes("just a moment") ||
+    h.includes("cloudflare") ||
+    h.includes("cf-challenge") ||
+    h.includes("attention required") ||
+    h.includes("please enable cookies")
+  );
+}
+
+async function fetchText(url) {
+  const res = await fetch(url, {
+    method: "GET",
+    redirect: "follow",
+    headers: {
+      // These headers materially improve Imgflip/CF behavior in CI
+      "User-Agent":
+        "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
+      Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+      "Accept-Language": "en-AU,en;q=0.9,en-US;q=0.8",
+      "Cache-Control": "no-cache",
+      Pragma: "no-cache",
+    },
+  });
+
+  const text = await res.text();
+  return { status: res.status, text, finalUrl: res.url };
+}
+
+async function headOk(url) {
+  try {
+    const res = await fetch(url, {
+      method: "HEAD",
+      redirect: "follow",
+      headers: {
+        "User-Agent":
+          "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
+        Accept: "*/*",
+        "Accept-Language": "en-AU,en;q=0.9,en-US;q=0.8",
+      },
+    });
+    if (!res.ok) return null;
+    const ct = res.headers.get("content-type") || "";
+    return { url: res.url, contentType: ct };
+  } catch {
+    return null;
+  }
+}
+
+function extractMetaContent(html, key) {
+  // key can be property="og:image" or name="twitter:title" etc.
+  // We’ll match both property= and name= variants.
+  const re1 = new RegExp(
+    `<meta\\s+[^>]*(?:property|name)="${key.replace(/[-/\\^$*+?.()|[\]{}]/g, "\\$&")}"[^>]*content="([^"]+)"[^>]*>`,
+    "i"
+  );
+  const m1 = html.match(re1);
+  if (m1?.[1]) return m1[1].trim();
+
+  const re2 = new RegExp(
+    `<meta\\s+[^>]*content="([^"]+)"[^>]*(?:property|name)="${key.replace(/[-/\\^$*+?.()|[\]{}]/g, "\\$&")}"[^>]*>`,
+    "i"
+  );
+  const m2 = html.match(re2);
+  if (m2?.[1]) return m2[1].trim();
+
+  return "";
+}
+
+function extractTagsFromImgflipHtml(html) {
+  // Best-effort: find /tags/<slug> links.
+  const tags = [];
+  const re = /href="\/tags\/([^"\/?#]+)"/gi;
+  let m;
+  while ((m = re.exec(html)) !== null) {
+    const slug = decodeURIComponent(m[1]).trim();
+    if (slug) tags.push(slug.replace(/-/g, " "));
+  }
+  return unique(tags);
+}
+
+async function getMemeDetails(id) {
+  const pageUrl = `https://imgflip.com/i/${id}`;
+
+  // 1) Try scraping the meme page
+  try {
+    const { status, text } = await fetchText(pageUrl);
+
+    if (status >= 200 && status < 400 && text && !isBotBlockHtml(text)) {
+      const ogImage = extractMetaContent(text, "og:image");
+      const ogTitle = extractMetaContent(text, "og:title");
+      const title =
+        (ogTitle || "").replace(/\s*-\s*Imgflip\s*$/i, "").trim() || id;
+
+      const imageUrl = ogImage || "";
+      const isGif = imageUrl.toLowerCase().includes(".gif") ? "TRUE" : "FALSE";
+
+      const tags = extractTagsFromImgflipHtml(text);
+
+      return {
+        id,
+        pageUrl,
+        imageUrl,
+        isGif,
+        title,
+        tags,
+        source: "page",
+      };
+    } else {
+      warn(`Imgflip page fetch looked blocked or empty for ${id} (status=${status}). Falling back.`);
+    }
+  } catch (e) {
+    warn(`Imgflip page fetch failed for ${id}. Falling back.`, e?.message || e);
+  }
+
+  // 2) Fallback: probe i.imgflip.com for a working asset
+  // Try jpg -> png -> gif.
+  const exts = ["jpg", "png", "gif"];
+  for (const ext of exts) {
+    const assetUrl = `https://i.imgflip.com/${id}.${ext}`;
+    const ok = await headOk(assetUrl);
+    if (ok) {
+      const isGif = ext === "gif" || ok.contentType.toLowerCase().includes("gif") ? "TRUE" : "FALSE";
+      return {
+        id,
+        pageUrl,
+        imageUrl: ok.url || assetUrl,
+        isGif,
+        title: id,
+        tags: [],
+        source: "asset",
+      };
+    }
+  }
+
+  // 3) Worst-case: return minimal
+  return {
+    id,
+    pageUrl,
+    imageUrl: "",
+    isGif: "FALSE",
+    title: id,
+    tags: [],
+    source: "none",
   };
+}
 
-  const mbtiCell = (item.mbti_types || []).join(", ");
-  const kwCell   = (item.keywords || []).join(", ");
-  const tagCell  = (item.tags || []).join(", ");
+async function getTopIdsFromListPage() {
+  const { status, text, finalUrl } = await fetchText(IMGFLIP_LIST_PAGE);
+  if (!(status >= 200 && status < 400)) {
+    die(`Failed to fetch IMGFLIP_LIST_PAGE (${IMGFLIP_LIST_PAGE}). status=${status}`);
+  }
+  if (!text || isBotBlockHtml(text)) {
+    die(
+      `List page appears blocked (Cloudflare/bot protection). ` +
+        `Try setting IMGFLIP_LIST_PAGE to a different page or use a server-side accessible source. ` +
+        `URL=${finalUrl}`
+    );
+  }
 
+  // Extract IDs from /i/<id> links
+  const ids = [];
+  const re = /href="\/i\/([a-z0-9]+)"/gi;
+  let m;
+  while ((m = re.exec(text)) !== null) {
+    ids.push(m[1]);
+  }
+
+  const uniqueIds = unique(ids);
+  if (uniqueIds.length < TOP_N) {
+    die(`Could only find ${uniqueIds.length} meme IDs on list page; need at least ${TOP_N}.`);
+  }
+
+  return uniqueIds.slice(0, TOP_N);
+}
+
+function ensureHeaders(parsedHeaders) {
+  // If file is empty or has different headers, we still output canonical headers.
+  const normalized = (parsedHeaders || []).map((h) => String(h ?? "").trim());
+  const ok =
+    normalized.length === CSV_HEADERS.length &&
+    normalized.every((h, i) => h === CSV_HEADERS[i]);
+
+  if (!ok) {
+    warn("CSV headers missing/mismatched; output will be rewritten with canonical headers.");
+    return CSV_HEADERS;
+  }
+  return normalized;
+}
+
+async function readExistingCsv() {
+  try {
+    const text = await fs.readFile(CSV_PATH, "utf8");
+    const parsed = parseCSV(text);
+    const headers = ensureHeaders(parsed.headers);
+    const rows = parsed.rows.map((r) => {
+      const obj = toRowObject(parsed.headers.length ? parsed.headers : headers, r);
+      // Ensure all headers exist
+      const full = {};
+      for (const h of headers) full[h] = obj[h] ?? "";
+      return full;
+    });
+    return { headers, rows };
+  } catch (e) {
+    if (e?.code === "ENOENT") {
+      return { headers: CSV_HEADERS, rows: [] };
+    }
+    throw e;
+  }
+}
+
+async function writeCsv(headers, rowObjects) {
+  const lines = [];
+  lines.push(csvLine(headers));
+  for (const obj of rowObjects) {
+    lines.push(csvLine(fromRowObject(headers, obj)));
+  }
+  lines.push(""); // trailing newline
+  await fs.writeFile(CSV_PATH, lines.join("\n"), "utf8");
+}
+
+function makeBlankRowForId(id) {
   const row = {};
-  for (const h of headers) row[h] = "";
-
-  row["ID"] = item.id || "";
-  row[urlHeader] = item.url || "";
-
-  if (headers.includes("IMAGE_URL")) row["IMAGE_URL"] = item.image_url || "";
-  if (headers.includes("IS_GIF")) row["IS_GIF"] = boolStr(!!item.is_gif);
-  if (headers.includes("TITLE")) row["TITLE"] = item.title || "";
-  if (headers.includes("MEME_TYPE")) row["MEME_TYPE"] = item.meme_type || "";
-  if (headers.includes("KYM_SLUG")) row["KYM_SLUG"] = item.kym_slug || "";
-
-  if (headers.includes("MBTI_TYPES")) row["MBTI_TYPES"] = mbtiCell;
-  if (headers.includes("KEYWORDS")) row["KEYWORDS"] = kwCell;
-  if (headers.includes("TAGS")) row["TAGS"] = tagCell;
-
+  for (const h of CSV_HEADERS) row[h] = "";
+  row.ID = id;
+  row.URLS = `https://imgflip.com/i/${id}`;
+  row.IMAGE_URL = "";
+  row.IS_GIF = "FALSE";
+  row.TITLE = id;
+  row.MEME_TYPE = "";
+  row.KYM_SLUG = "";
+  row.MBTI_TYPES = "";
+  row.KEYWORDS = "";
+  row.TAGS = "";
   return row;
 }
 
-function detectUpperBoolStyle(rows, key) {
-  for (const r of rows) {
-    const v = String(r?.[key] ?? "").trim();
-    if (v === "TRUE" || v === "FALSE") return true;
-    if (v === "true" || v === "false") return false;
+function tagsToCsvString(tags) {
+  // Keep as a single CSV field with comma+space separation
+  return tags.join(", ");
+}
+
+async function main() {
+  log(`Using list page: ${IMGFLIP_LIST_PAGE}`);
+
+  const topIds = await getTopIdsFromListPage();
+  log(`Top ${TOP_N} IDs on page: ${topIds.join(", ")}`);
+
+  const { headers, rows: existingRows } = await readExistingCsv();
+
+  // First 14 IDs in CSV
+  const existingTop = existingRows.slice(0, TOP_N).map((r) => String(r.ID || "").trim()).filter(Boolean);
+
+  // If CSV already has the same top 14 in the same order, do nothing.
+  const identical =
+    existingTop.length === TOP_N &&
+    existingTop.every((id, i) => id === topIds[i]);
+
+  if (identical) {
+    log("Top 14 IDs already match. No changes needed.");
+    process.exit(0);
   }
-  // Default to lowercase if we can't infer
-  return false;
-}
 
-function arraysEqual(a, b) {
-  if (!Array.isArray(a) || !Array.isArray(b)) return false;
-  if (a.length !== b.length) return false;
-  for (let i = 0; i < a.length; i++) {
-    if (String(a[i]) !== String(b[i])) return false;
+  // Determine missing IDs that are in page topIds but not in existingTop
+  const missing = topIds.filter((id) => !existingTop.includes(id));
+  if (missing.length === 0) {
+    // Order changed but same set; update order by moving rows accordingly
+    log("Same IDs but order changed. Reordering top 14 to match page.");
+
+    const byId = new Map(existingRows.map((r) => [String(r.ID || "").trim(), r]));
+    const newTopRows = topIds.map((id) => byId.get(id) || makeBlankRowForId(id));
+
+    // Keep the rest of the CSV as-is, excluding any IDs we already placed in top 14 (to avoid duplicates)
+    const placed = new Set(topIds);
+    const remainder = existingRows.filter((r) => !placed.has(String(r.ID || "").trim()));
+
+    const out = [...newTopRows, ...remainder];
+    await writeCsv(headers, out);
+    log(`Updated memes.csv (reordered top ${TOP_N}).`);
+    process.exit(0);
   }
-  return true;
+
+  log(`Missing new IDs (to insert at top): ${missing.join(", ")}`);
+
+  // Build new rows for missing IDs with page-derived details
+  const newRows = [];
+  for (const id of missing) {
+    const blank = makeBlankRowForId(id);
+    const details = await getMemeDetails(id);
+
+    blank.URLS = details.pageUrl;
+    blank.IMAGE_URL = details.imageUrl || "";
+    blank.IS_GIF = normalizeBool(details.isGif);
+    blank.TITLE = details.title || id;
+
+    if (details.tags?.length) {
+      // Place tags into TAGS column; user rules around MBTI/keywords can be applied later if needed
+      blank.TAGS = tagsToCsvString(details.tags);
+    }
+
+    // Leave other fields blank for new rows unless you want additional enrichment.
+    newRows.push(blank);
+
+    log(`Fetched ${id}: source=${details.source} title="${blank.TITLE}" image="${blank.IMAGE_URL}" gif=${blank.IS_GIF}`);
+  }
+
+  // Keep the existing top 14 rows, but only the ones that are still in page topIds (to preserve the “other 12 as is” logic)
+  const keepFromExistingTop = existingRows
+    .slice(0, TOP_N)
+    .filter((r) => topIds.includes(String(r.ID || "").trim()));
+
+  // Now construct final top 14:
+  // - new rows for missing IDs in the page order
+  // - plus the kept existing rows (in the page order)
+  const byId = new Map();
+  for (const r of newRows) byId.set(String(r.ID).trim(), r);
+  for (const r of keepFromExistingTop) byId.set(String(r.ID).trim(), r);
+
+  const finalTop14 = topIds.map((id) => byId.get(id) || makeBlankRowForId(id));
+
+  // Remainder: keep everything below the original top 14 as-is,
+  // but remove any IDs that now appear in finalTop14 to avoid duplicates.
+  const finalTopSet = new Set(finalTop14.map((r) => String(r.ID || "").trim()));
+  const remainder = existingRows.slice(TOP_N).filter((r) => !finalTopSet.has(String(r.ID || "").trim()));
+
+  const out = [...finalTop14, ...remainder];
+
+  await writeCsv(headers, out);
+  log(`Updated memes.csv: inserted ${missing.length} new row(s) at the top; preserved remaining rows.`);
 }
 
-// ----------------------- misc -----------------------
-
-function csvEscape(v) {
-  const s = String(v ?? "");
-  if (/[",\r\n]/.test(s)) return `"${s.replace(/"/g, '""')}"`;
-  return s;
-}
-
-function unique(arr) { return Array.from(new Set(arr)); }
-function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
-
-function toTitleCase(s) {
-  return String(s)
-    .trim()
-    .toLowerCase()
-    .split(/\s+/)
-    .map(w => (w ? w[0].toUpperCase() + w.slice(1) : w))
-    .join(" ");
-}
-
-main().catch(err => {
-  console.error(err);
-  process.exit(1);
+main().catch((e) => {
+  die(e?.stack || e?.message || String(e));
 });
