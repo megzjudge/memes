@@ -4,11 +4,11 @@ const USERNAME = "mbtininja";
 const LIST_URL = `https://imgflip.com/all/user-images/${USERNAME}?sort=latest`;
 
 const OUT_FILE = "memes.csv";
-const MAX_ITEMS = 200;
-const REQUEST_DELAY_MS = 175;
 
-// Refuse to overwrite a large existing file with a tiny scrape result
-const MIN_EXPECTED_ENTRIES_WHEN_EXISTING = 50;
+// You said: scan last 14 submissions only
+const SCAN_COUNT = 14;
+
+const REQUEST_DELAY_MS = 175;
 
 const IMGFLIP_HEADERS = {
   "User-Agent":
@@ -31,139 +31,94 @@ const MEME_TYPE_EXCLUDE = new Set([
 ]);
 
 async function main() {
-  // 1) Load existing file (if present) so we only add/merge, never wipe out
-  const existingMap = await readExistingCsvMap(OUT_FILE);
+  // 1) Read existing CSV (if any)
+  const existing = await readExistingCsv(OUT_FILE);
+  const existingRows = existing.rows;            // array of row objects keyed by headers
+  const headers = existing.headers.length ? existing.headers : [
+    "ID","URL","IMAGE_URL","IS_GIF","TITLE","MEME_TYPE","KYM_SLUG","MBTI_TYPES","KEYWORDS","TAGS"
+  ];
 
-  const html = await fetchText(LIST_URL);
-  const entries = collectIdsFromListingHtml(html).slice(0, MAX_ITEMS);
+  // Figure out which header name we should write for the page URL column
+  const urlHeader =
+    headers.find(h => h === "URLS") ||
+    headers.find(h => h === "URL")  ||
+    "URL";
 
-  // Safety: if we already have a file and suddenly scrape very few items, do not overwrite.
-  if (existingMap.size > 0 && entries.length < MIN_EXPECTED_ENTRIES_WHEN_EXISTING) {
-    throw new Error(
-      `Sanity check failed: only ${entries.length} entries found, but existing ${OUT_FILE} has ${existingMap.size} rows. Refusing to overwrite.`
-    );
+  // Use existing boolean style if present (TRUE/FALSE vs true/false)
+  const boolStyleUpper = detectUpperBoolStyle(existingRows, "IS_GIF");
+
+  // Build lookup sets and the current top-14 from the CSV (by position)
+  const existingIdSet = new Set();
+  for (const r of existingRows) {
+    const id = String(r["ID"] ?? "").trim();
+    if (id) existingIdSet.add(id);
   }
 
-  const items = [];
-  for (const { id, ext } of entries) {
-    const item = await fetchAndParseItem(id, ext);
-    if (item) items.push(item);
+  const csvTopIds = existingRows
+    .slice(0, SCAN_COUNT)
+    .map(r => String(r["ID"] ?? "").trim())
+    .filter(Boolean);
+
+  // 2) Scrape the 14 latest IDs from Imgflip listing
+  const listHtml = await fetchText(LIST_URL);
+  if (!listHtml) {
+    throw new Error("Failed to fetch Imgflip listing HTML (empty response).");
+  }
+
+  const listingIds = collectIdsFromListingHtml(listHtml)
+    .map(x => x.id)
+    .filter(Boolean)
+    .slice(0, SCAN_COUNT);
+
+  if (listingIds.length === 0) {
+    throw new Error("No IDs found on Imgflip listing page.");
+  }
+
+  // 3) If top-14 already match, do nothing
+  if (arraysEqual(csvTopIds, listingIds)) {
+    console.log(`Top ${SCAN_COUNT} IDs match. No CSV changes needed.`);
+    return;
+  }
+
+  // 4) Find new IDs (present in listing top-14, not anywhere in CSV)
+  const newIds = listingIds.filter(id => !existingIdSet.has(id));
+
+  // If nothing new, do nothing (covers re-ordering on Imgflip, etc.)
+  if (newIds.length === 0) {
+    console.log(
+      `Top ${SCAN_COUNT} IDs differ, but no new IDs found (reorder-only). No CSV changes needed.`
+    );
+    return;
+  }
+
+  // 5) Fetch+parse only the new IDs and create new rows
+  const newItems = [];
+  for (const id of newIds) {
+    const item = await fetchAndParseItem(id, "");
+    if (item) newItems.push(item);
     await sleep(REQUEST_DELAY_MS);
   }
 
-  // 2) Merge:
-  //    - if id already exists, NEVER replace existing data with blanks/minimal scrape
-  //    - only "upgrade" existing row when the new scrape has real fields
-  //    - new items first (latest), then carry over older existing
-  const mergedMap = new Map();
+  // Convert parsed items into CSV row objects matching existing headers
+  const newRows = newItems.map(it => itemToRow(it, headers, urlHeader, boolStyleUpper));
 
-  // helper: add/update mergedMap with best-available data
-  const upsertMerged = (incoming) => {
-    if (!incoming?.id) return;
-    const id = String(incoming.id).trim();
-    if (!id) return;
+  // 6) Prepend new rows; leave existing rows untouched
+  const finalRows = [...newRows, ...existingRows];
 
-    const existingRow = existingMap.get(id);
-    const existingObj = existingRow ? existingCsvRowToItem(id, existingRow) : null;
-
-    // If we already inserted something for this id this run, compare against that instead
-    const currentMerged = mergedMap.get(id) || existingObj;
-
-    // If nothing exists, accept incoming as-is
-    if (!currentMerged) {
-      mergedMap.set(id, normalizeItem(incoming));
-      return;
-    }
-
-    // If we have existing, only merge-in fields from incoming when they are "meaningfully present"
-    const upgraded = mergePreferNonEmpty(currentMerged, incoming);
-
-    mergedMap.set(id, upgraded);
-  };
-
-  // First pass: newest scraped items in listing order
-  for (const it of items) upsertMerged(it);
-
-  // Second pass: carry over everything else that wasn't in the recent scrape window
-  for (const [id, row] of existingMap.entries()) {
-    if (!mergedMap.has(id)) {
-      mergedMap.set(id, existingCsvRowToItem(id, row));
-    }
-  }
-
-  // Turn into ordered list: newest-first based on listing order, then the remainder in prior file order
-  const ordered = [];
-  const seen = new Set();
-
-  for (const it of items) {
-    const id = String(it?.id || "").trim();
-    if (!id || seen.has(id)) continue;
-    const v = mergedMap.get(id);
-    if (v) {
-      ordered.push(v);
-      seen.add(id);
-    }
-  }
-
-  for (const [id] of existingMap.entries()) {
-    if (seen.has(id)) continue;
-    const v = mergedMap.get(id);
-    if (v) {
-      ordered.push(v);
-      seen.add(id);
-    }
-  }
-
-  // 3) Hard cap so file doesn't grow
-  const finalItems = ordered.slice(0, MAX_ITEMS);
-
-  const header = [
-    "ID","URL","IMAGE_URL","IS_GIF","TITLE","MEME_TYPE","KYM_SLUG",
-    "MBTI_TYPES","KEYWORDS","TAGS"
-  ];
-
-  const rows = finalItems.map(it => {
-    const mbtiCell = (it.mbti_types || []).join(", ");
-    const kwCell   = (it.keywords || []).join(", ");
-    const tagCell  = (it.tags || []).join(", ");
-
-    return [
-      it.id || "",
-      it.url || "",
-      it.image_url || "",
-      it.is_gif ? "true" : "false",
-      it.title || "",
-      it.meme_type || "",
-      it.kym_slug || "",
-      mbtiCell,
-      kwCell,
-      tagCell
-    ].map(csvEscape).join(",");
-  });
-
-  const out = [header.join(","), ...rows].join("\n") + "\n";
-
-  // Safety: if existing file is large, refuse to shrink it dramatically unless we have enough rows
-  if (existingMap.size > 0 && finalItems.length < Math.min(existingMap.size, MIN_EXPECTED_ENTRIES_WHEN_EXISTING)) {
-    throw new Error(
-      `Refusing to write: would shrink ${OUT_FILE} from ${existingMap.size} rows to ${finalItems.length}.`
-    );
-  }
-
+  // 7) Write out the CSV with the same headers (or default)
+  const out = writeCsv(headers, finalRows);
   await fs.writeFile(OUT_FILE, out, "utf8");
 
-  const carried = Math.max(0, finalItems.length - items.length);
-  console.log(`Wrote ${finalItems.length} items to ${OUT_FILE} (fetched=${items.length}, carried_over=${carried})`);
+  console.log(`Prepended ${newRows.length} new row(s) to ${OUT_FILE}.`);
 }
 
-// --- Listing extraction ---
-// Updated: prefer /i/<id> links (stable), then fall back to CDN jpg/gif matches.
+// ----------------------- Listing extraction -----------------------
+// Prefer /i/<id> links (stable), then fallback to CDN jpg/gif matches.
 function collectIdsFromListingHtml(html) {
   if (!html) return [];
   const seen = new Set();
   const out = [];
 
-  // Primary: link-based extraction
   const linkRegex = /href=["']\/i\/([A-Za-z0-9]+)["']/gi;
   let m;
   while ((m = linkRegex.exec(html))) {
@@ -173,7 +128,6 @@ function collectIdsFromListingHtml(html) {
     out.push({ id, ext: "" });
   }
 
-  // Fallback: CDN image URLs (jpg/gif)
   const imgRegex = /(?:https?:)?\/\/i\.imgflip\.com\/([A-Za-z0-9]+)\.(jpg|gif)/gi;
   while ((m = imgRegex.exec(html))) {
     const id = m[1];
@@ -185,6 +139,8 @@ function collectIdsFromListingHtml(html) {
 
   return out;
 }
+
+// ----------------------- Item fetch/parse -----------------------
 
 async function fetchAndParseItem(id, extFromList) {
   const pageUrl = `https://imgflip.com/i/${id}`;
@@ -257,7 +213,6 @@ function parseFromJson(obj, id, pageUrl) {
       mbti.push(upper);
       continue;
     }
-    // remove meme_type from keywords (if it matches)
     if (item.meme_type && t === item.meme_type.toLowerCase()) continue;
     keywords.push(t);
   }
@@ -302,136 +257,24 @@ async function fetchText(url) {
   }
 }
 
-// --- Existing CSV merge helpers ---
+// ----------------------- CSV read/write -----------------------
 
-async function readExistingCsvMap(filePath) {
+async function readExistingCsv(filePath) {
   try {
     const text = await fs.readFile(filePath, "utf8");
-    const rows = parseCsv(text, ",");
-    const map = new Map();
-    for (const r of rows) {
-      const id = String(pick(r, ["ID", "id"]) || "").trim();
-      if (!id) continue;
-      map.set(id, r);
-    }
-    return map;
+    const parsed = parseCsvKeepHeader(text, ",");
+    return parsed;
   } catch {
-    return new Map();
+    return { headers: [], rows: [] };
   }
 }
 
-function existingCsvRowToItem(id, r) {
-  return normalizeItem({
-    id,
-    url: String(r.URL ?? r.url ?? "").trim() || `https://imgflip.com/i/${id}`,
-    image_url: String(r.IMAGE_URL ?? r.image_url ?? "").trim(),
-    is_gif: String(r.IS_GIF ?? r.is_gif ?? "").trim().toLowerCase() === "true",
-    title: String(r.TITLE ?? r.title ?? "").trim() || id,
-    meme_type: String(r.MEME_TYPE ?? r.meme_type ?? "").trim(),
-    kym_slug: String(r.KYM_SLUG ?? r.kym_slug ?? "").trim(),
-    mbti_types: splitCsvCell(r.MBTI_TYPES ?? r.mbti_types),
-    keywords: splitCsvCell(r.KEYWORDS ?? r.keywords),
-    tags: splitCsvCell(r.TAGS ?? r.tags)
-  });
-}
-
-function normalizeItem(it) {
-  const id = String(it?.id || "").trim();
-  const url = String(it?.url || "").trim() || (id ? `https://imgflip.com/i/${id}` : "");
-  const image_url = String(it?.image_url || "").trim();
-  const is_gif = !!it?.is_gif;
-
-  const title = String(it?.title || "").trim() || id;
-  const meme_type = String(it?.meme_type || "").trim();
-  const kym_slug = String(it?.kym_slug || "").trim();
-
-  const mbti_types = Array.isArray(it?.mbti_types) ? it.mbti_types.map(x => String(x).trim()).filter(Boolean) : [];
-  const keywords = Array.isArray(it?.keywords) ? it.keywords.map(x => String(x).trim()).filter(Boolean) : [];
-  const tags = Array.isArray(it?.tags) ? it.tags.map(x => String(x).trim()).filter(Boolean) : [];
-
-  return { id, url, image_url, is_gif, title, meme_type, kym_slug, mbti_types, keywords, tags };
-}
-
-function mergePreferNonEmpty(baseItem, incomingItem) {
-  const base = normalizeItem(baseItem);
-  const inc = normalizeItem(incomingItem);
-
-  // If incoming looks "minimal" (basically just id/url/title), do not downgrade anything.
-  const incomingScore = qualityScore(inc);
-  const baseScore = qualityScore(base);
-
-  // If the scrape is worse/equal and has no real new info, keep base.
-  // If it has better info, merge field-by-field (only non-empty / better values).
-  if (incomingScore <= baseScore) {
-    return base;
-  }
-
-  const out = { ...base };
-
-  // Only overwrite scalar fields when incoming is non-empty AND different
-  if (inc.url) out.url = inc.url;
-  if (inc.image_url) out.image_url = inc.image_url;
-  // is_gif: only overwrite if incoming has image_url that implies it OR base has none and incoming has determination
-  if (inc.image_url) out.is_gif = inc.is_gif;
-
-  if (inc.title && inc.title !== inc.id) out.title = inc.title;
-  if (inc.meme_type) out.meme_type = inc.meme_type;
-  if (inc.kym_slug) out.kym_slug = inc.kym_slug;
-
-  // Arrays: prefer union, but keep order stable (base first, then new)
-  out.mbti_types = unionStable(base.mbti_types, inc.mbti_types);
-  out.keywords = unionStable(base.keywords, inc.keywords);
-  out.tags = unionStable(base.tags, inc.tags);
-
-  return out;
-}
-
-function qualityScore(it) {
-  // Higher = more trustworthy/useful row.
-  // Key idea: a "minimalItem" has almost no score beyond url/title.
-  let score = 0;
-
-  if (it.url && it.url.includes("imgflip.com/i/")) score += 1;
-  if (it.image_url && /^https?:\/\//i.test(it.image_url)) score += 3;
-  if (it.title && it.title !== it.id) score += 2;
-  if (it.meme_type) score += 2;
-  if (it.kym_slug) score += 2;
-
-  if (Array.isArray(it.mbti_types) && it.mbti_types.length) score += Math.min(3, it.mbti_types.length);
-  if (Array.isArray(it.keywords) && it.keywords.length) score += Math.min(3, it.keywords.length);
-  if (Array.isArray(it.tags) && it.tags.length) score += Math.min(3, it.tags.length);
-
-  return score;
-}
-
-function unionStable(a, b) {
-  const out = [];
-  const seen = new Set();
-
-  for (const x of (Array.isArray(a) ? a : [])) {
-    const v = String(x).trim();
-    if (!v || seen.has(v)) continue;
-    seen.add(v);
-    out.push(v);
-  }
-
-  for (const x of (Array.isArray(b) ? b : [])) {
-    const v = String(x).trim();
-    if (!v || seen.has(v)) continue;
-    seen.add(v);
-    out.push(v);
-  }
-
-  return out;
-}
-
-function parseCsv(text, delimiter) {
+function parseCsvKeepHeader(text, delimiter) {
   const lines = String(text)
     .split(/\r?\n/)
-    .map(l => l.trim())
-    .filter(Boolean);
+    .filter(l => l.length > 0);
 
-  if (lines.length < 2) return [];
+  if (lines.length < 2) return { headers: [], rows: [] };
 
   const headers = splitCsvLine(lines[0], delimiter).map((h, idx) => {
     let hh = String(h || "");
@@ -439,7 +282,7 @@ function parseCsv(text, delimiter) {
     return hh.trim();
   });
 
-  const out = [];
+  const rows = [];
   for (let i = 1; i < lines.length; i++) {
     const cols = splitCsvLine(lines[i], delimiter);
     if (!cols.length) continue;
@@ -448,9 +291,10 @@ function parseCsv(text, delimiter) {
     for (let j = 0; j < headers.length; j++) {
       row[headers[j]] = cols[j] !== undefined ? cols[j] : "";
     }
-    out.push(row);
+    rows.push(row);
   }
-  return out;
+
+  return { headers, rows };
 }
 
 function splitCsvLine(line, delimiter) {
@@ -486,22 +330,67 @@ function splitCsvLine(line, delimiter) {
   return out.map(x => x.trim());
 }
 
-function pick(obj, keys) {
-  if (!obj) return "";
-  for (const k of keys) {
-    if (obj[k] !== undefined) return obj[k];
+function writeCsv(headers, rows) {
+  const headerLine = headers.map(csvEscape).join(",");
+  const lines = [headerLine];
+
+  for (const r of rows) {
+    const cols = headers.map(h => csvEscape(r?.[h] ?? ""));
+    lines.push(cols.join(","));
   }
-  return "";
+
+  return lines.join("\n") + "\n";
 }
 
-function splitCsvCell(v) {
-  return String(v ?? "")
-    .split(",")
-    .map(s => s.trim())
-    .filter(Boolean);
+function itemToRow(item, headers, urlHeader, boolStyleUpper) {
+  const boolStr = (b) => {
+    const v = b ? "true" : "false";
+    return boolStyleUpper ? v.toUpperCase() : v;
+  };
+
+  const mbtiCell = (item.mbti_types || []).join(", ");
+  const kwCell   = (item.keywords || []).join(", ");
+  const tagCell  = (item.tags || []).join(", ");
+
+  const row = {};
+  for (const h of headers) row[h] = "";
+
+  row["ID"] = item.id || "";
+  row[urlHeader] = item.url || "";
+
+  if (headers.includes("IMAGE_URL")) row["IMAGE_URL"] = item.image_url || "";
+  if (headers.includes("IS_GIF")) row["IS_GIF"] = boolStr(!!item.is_gif);
+  if (headers.includes("TITLE")) row["TITLE"] = item.title || "";
+  if (headers.includes("MEME_TYPE")) row["MEME_TYPE"] = item.meme_type || "";
+  if (headers.includes("KYM_SLUG")) row["KYM_SLUG"] = item.kym_slug || "";
+
+  if (headers.includes("MBTI_TYPES")) row["MBTI_TYPES"] = mbtiCell;
+  if (headers.includes("KEYWORDS")) row["KEYWORDS"] = kwCell;
+  if (headers.includes("TAGS")) row["TAGS"] = tagCell;
+
+  return row;
 }
 
-// --- misc ---
+function detectUpperBoolStyle(rows, key) {
+  for (const r of rows) {
+    const v = String(r?.[key] ?? "").trim();
+    if (v === "TRUE" || v === "FALSE") return true;
+    if (v === "true" || v === "false") return false;
+  }
+  // Default to lowercase if we can't infer
+  return false;
+}
+
+function arraysEqual(a, b) {
+  if (!Array.isArray(a) || !Array.isArray(b)) return false;
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) {
+    if (String(a[i]) !== String(b[i])) return false;
+  }
+  return true;
+}
+
+// ----------------------- misc -----------------------
 
 function csvEscape(v) {
   const s = String(v ?? "");
@@ -511,6 +400,7 @@ function csvEscape(v) {
 
 function unique(arr) { return Array.from(new Set(arr)); }
 function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
+
 function toTitleCase(s) {
   return String(s)
     .trim()
