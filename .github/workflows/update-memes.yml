@@ -20,8 +20,7 @@ jobs:
       - name: Update memes.csv
         run: node update-memes.mjs
         env:
-          IMGFLIP_USERNAME: mbtininja
-          IMGFLIP_LIST_PAGE: https://imgflip.com/all/user-images/mbtininja?sort=latest
+          IMGFLIP_LIST_PAGE: https://imgflip.com/m/fun/user-images/mbtininja?page=1
 
       - name: Commit changes if any
         run: |

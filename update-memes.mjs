@@ -18,11 +18,18 @@ import process from "node:process";
 const CSV_PATH = path.resolve(process.cwd(), "memes.csv");
 
 const IMGFLIP_USERNAME = process.env.IMGFLIP_USERNAME || "mbtininja";
+
 const IMGFLIP_LIST_PAGE =
   process.env.IMGFLIP_LIST_PAGE ||
-  `https://imgflip.com/all/user-images/${encodeURIComponent(IMGFLIP_USERNAME)}?sort=latest`;
+  `https://imgflip.com/m/fun/user-images/${encodeURIComponent(IMGFLIP_USERNAME)}?page=1`;
 
 const TOP_N = 14;
+
+const CANDIDATE_LIST_PAGES = [
+  IMGFLIP_LIST_PAGE,
+  `https://imgflip.com/all/user-images/${encodeURIComponent(IMGFLIP_USERNAME)}?sort=latest`,
+  `https://imgflip.com/user/${encodeURIComponent(IMGFLIP_USERNAME)}`
+];
 
 const CSV_HEADERS = [
   "ID",
@@ -313,31 +320,40 @@ async function fetchTextWithListFallback(url) {
 }
 
 async function getTopIdsFromListPage() {
-  const { status, text, finalUrl } = await fetchTextWithListFallback(IMGFLIP_LIST_PAGE);
+  for (const url of CANDIDATE_LIST_PAGES) {
+    log(`Trying list page: ${url}`);
 
-  if (!(status >= 200 && status < 400)) {
-    die(`Failed to fetch IMGFLIP_LIST_PAGE (${IMGFLIP_LIST_PAGE}). status=${status}`);
-  }
-  if (!text || isBotBlockHtml(text)) {
-    die(
-      `List page appears blocked (Cloudflare/bot protection) even after proxy. ` +
-      `URL=${finalUrl}`
-    );
+    const { status, text, finalUrl } = await fetchTextWithListFallback(url);
+
+    if (!(status >= 200 && status < 400)) {
+      warn(`List page failed. status=${status} url=${finalUrl}`);
+      continue;
+    }
+    if (!text || isBotBlockHtml(text)) {
+      warn(`List page blocked or empty. url=${finalUrl}`);
+      continue;
+    }
+
+    const ids = [];
+    const re = /(?:href=")?https?:\/\/imgflip\.com\/i\/([a-z0-9]+)|href="\/i\/([a-z0-9]+)"/gi;
+    let m;
+    while ((m = re.exec(text)) !== null) {
+      ids.push(m[1] || m[2]);
+    }
+
+    const uniqueIds = unique(ids);
+    if (uniqueIds.length >= TOP_N) {
+      log(`Found ${uniqueIds.length} IDs on ${finalUrl}`);
+      return uniqueIds.slice(0, TOP_N);
+    }
+
+    warn(`Only found ${uniqueIds.length} IDs on ${finalUrl}; need at least ${TOP_N}. Trying next candidate.`);
   }
 
-  const ids = [];
-  const re = /(?:href=")?https?:\/\/imgflip\.com\/i\/([a-z0-9]+)|href="\/i\/([a-z0-9]+)"/gi;
-  let m;
-  while ((m = re.exec(text)) !== null) {
-    ids.push(m[1] || m[2]);
-  }
-
-  const uniqueIds = unique(ids);
-  if (uniqueIds.length < TOP_N) {
-    die(`Could only find ${uniqueIds.length} meme IDs on list page; need at least ${TOP_N}.`);
-  }
-
-  return uniqueIds.slice(0, TOP_N);
+  die(
+    `All candidate list pages failed or were blocked. ` +
+    `Tried: ${CANDIDATE_LIST_PAGES.join(" | ")}`
+  );
 }
 
 function ensureHeaders(parsedHeaders) {
