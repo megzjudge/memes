@@ -17,16 +17,11 @@ jobs:
         with:
           node-version: "20"
 
-      - name: Install Playwright
-        run: npm i playwright
-
-      - name: Install Playwright Chromium
-        run: npx playwright install --with-deps chromium
-
       - name: Update memes.csv
         run: node update-memes.mjs
         env:
-          IMGFLIP_LIST_PAGE: https://imgflip.com/m/fun/user-images/mbtininja?page=1
+          IMGFLIP_USERNAME: mbtininja
+          IMGFLIP_AJAX_URL: https://imgflip.com/ajax_get_user_images?username=mbtininja&sort=latest&page=1
 
       - name: Commit changes if any
         run: |

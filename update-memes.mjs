@@ -4,11 +4,15 @@
  *
  * Behavior:
  * - Reads memes.csv (if present)
- * - Scrapes the Imgflip page for the current top 14 meme IDs
+ * - Discovers the current top 14 meme IDs via Imgflip AJAX JSON feed (preferred)
+ *   - Optional fallback: scrape HTML list pages if JSON is unavailable
  * - Compares those 14 IDs to the first 14 rows in memes.csv
  * - If identical -> no change
- * - If new IDs are present -> inserts only the missing ones at the top, keeping the other existing rows as-is
+ * - If new IDs are present -> inserts only the missing ones at the top, keeping other existing rows as-is
  * - For newly inserted rows, fetches per-meme page data and fills IMAGE_URL / IS_GIF / TITLE (best-effort)
+ *
+ * CI behavior:
+ * - If discovery is blocked/unavailable, exits 0 (does not fail the workflow)
  */
 
 import fs from "node:fs/promises";
@@ -19,6 +23,14 @@ const CSV_PATH = path.resolve(process.cwd(), "memes.csv");
 
 const IMGFLIP_USERNAME = process.env.IMGFLIP_USERNAME || "mbtininja";
 
+// Prefer JSON feed; allow override
+const IMGFLIP_AJAX_URL =
+  process.env.IMGFLIP_AJAX_URL ||
+  `https://imgflip.com/ajax_get_user_images?username=${encodeURIComponent(
+    IMGFLIP_USERNAME
+  )}&sort=latest&page=1`;
+
+// Optional HTML fallback candidates (only used if AJAX fails)
 const IMGFLIP_LIST_PAGE =
   process.env.IMGFLIP_LIST_PAGE ||
   `https://imgflip.com/m/fun/user-images/${encodeURIComponent(IMGFLIP_USERNAME)}?page=1`;
@@ -28,7 +40,7 @@ const TOP_N = 14;
 const CANDIDATE_LIST_PAGES = [
   IMGFLIP_LIST_PAGE,
   `https://imgflip.com/all/user-images/${encodeURIComponent(IMGFLIP_USERNAME)}?sort=latest`,
-  `https://imgflip.com/user/${encodeURIComponent(IMGFLIP_USERNAME)}`
+  `https://imgflip.com/user/${encodeURIComponent(IMGFLIP_USERNAME)}`,
 ];
 
 const CSV_HEADERS = [
@@ -44,6 +56,21 @@ const CSV_HEADERS = [
   "TAGS",
 ];
 
+const FETCH_HEADERS_HTML = {
+  "User-Agent":
+    "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
+  Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+  "Accept-Language": "en-AU,en;q=0.9,en-US;q=0.8",
+  "Cache-Control": "no-cache",
+  Pragma: "no-cache",
+  Referer: "https://imgflip.com/",
+};
+
+const FETCH_HEADERS_JSON = {
+  ...FETCH_HEADERS_HTML,
+  Accept: "application/json,text/plain,*/*",
+};
+
 function log(...args) {
   console.log(...args);
 }
@@ -55,28 +82,6 @@ function warn(...args) {
 function die(msg) {
   console.error(msg);
   process.exit(1);
-}
-
-async function getHtmlViaPlaywright(url) {
-  const { chromium } = await import("playwright");
-
-  const browser = await chromium.launch({ headless: true });
-  try {
-    const page = await browser.newPage({
-      userAgent:
-        "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
-      locale: "en-AU",
-    });
-
-    await page.goto(url, { waitUntil: "domcontentloaded", timeout: 45000 });
-
-    // Give any JS / interstitial a moment to settle
-    await page.waitForTimeout(3000);
-
-    return await page.content();
-  } finally {
-    await browser.close();
-  }
 }
 
 function normalizeBool(v) {
@@ -155,7 +160,9 @@ function parseCSV(text) {
   if (rows.length === 0) return { headers: [], rows: [] };
 
   const headers = rows[0].map((h) => String(h ?? "").trim());
-  const data = rows.slice(1).filter((r) => r.some((x) => String(x ?? "").trim() !== ""));
+  const data = rows
+    .slice(1)
+    .filter((r) => r.some((x) => String(x ?? "").trim() !== ""));
   return { headers, rows: data };
 }
 
@@ -174,34 +181,63 @@ function unique(arr) {
 }
 
 function isBotBlockHtml(html) {
-  const h = html.toLowerCase();
+  const h = String(html || "").toLowerCase();
   return (
     h.includes("checking your browser") ||
     h.includes("just a moment") ||
     h.includes("cloudflare") ||
     h.includes("cf-challenge") ||
     h.includes("attention required") ||
-    h.includes("please enable cookies")
+    h.includes("please enable cookies") ||
+    h.includes("captcha") ||
+    h.includes("unusual traffic")
   );
 }
 
-async function fetchText(url) {
-  const res = await fetch(url, {
-    method: "GET",
-    redirect: "follow",
-    headers: {
-      // These headers materially improve Imgflip/CF behavior in CI
-      "User-Agent":
-        "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
-      Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-      "Accept-Language": "en-AU,en;q=0.9,en-US;q=0.8",
-      "Cache-Control": "no-cache",
-      Pragma: "no-cache",
-    },
-  });
+async function fetchText(url, headers = FETCH_HEADERS_HTML) {
+  try {
+    const res = await fetch(url, {
+      method: "GET",
+      redirect: "follow",
+      headers,
+    });
+    const text = await res.text();
+    return { status: res.status, text, finalUrl: res.url };
+  } catch (e) {
+    return { status: 0, text: "", finalUrl: url, error: e?.message || String(e) };
+  }
+}
 
-  const text = await res.text();
-  return { status: res.status, text, finalUrl: res.url };
+async function fetchJson(url) {
+  const out = await fetchText(url, FETCH_HEADERS_JSON);
+  if (!out.text) return { ...out, data: null };
+  try {
+    return { ...out, data: JSON.parse(out.text) };
+  } catch {
+    return { ...out, data: null };
+  }
+}
+
+function extractIdsFromHtml(html) {
+  const ids = [];
+  const re =
+    /(?:href=")?https?:\/\/imgflip\.com\/i\/([a-z0-9]+)|href="\/i\/([a-z0-9]+)"/gi;
+  let m;
+  while ((m = re.exec(html)) !== null) {
+    ids.push(m[1] || m[2]);
+  }
+  return unique(ids);
+}
+
+function extractIdsFromJsonAnyShape(data) {
+  // Extremely robust: stringify the JSON and look for /i/<id>
+  // Avoids having to guess payload shape.
+  const s = JSON.stringify(data || {});
+  const ids = [];
+  const re = /\/i\/([a-z0-9]+)/gi;
+  let m;
+  while ((m = re.exec(s)) !== null) ids.push(m[1]);
+  return unique(ids);
 }
 
 async function headOk(url) {
@@ -210,10 +246,9 @@ async function headOk(url) {
       method: "HEAD",
       redirect: "follow",
       headers: {
-        "User-Agent":
-          "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
+        "User-Agent": FETCH_HEADERS_HTML["User-Agent"],
         Accept: "*/*",
-        "Accept-Language": "en-AU,en;q=0.9,en-US;q=0.8",
+        "Accept-Language": FETCH_HEADERS_HTML["Accept-Language"],
       },
     });
     if (!res.ok) return null;
@@ -225,27 +260,26 @@ async function headOk(url) {
 }
 
 function extractMetaContent(html, key) {
-  // key can be property="og:image" or name="twitter:title" etc.
-  // We’ll match both property= and name= variants.
+  const esc = key.replace(/[-/\\^$*+?.()|[\]{}]/g, "\\$&");
+
   const re1 = new RegExp(
-    `<meta\\s+[^>]*(?:property|name)="${key.replace(/[-/\\^$*+?.()|[\]{}]/g, "\\$&")}"[^>]*content="([^"]+)"[^>]*>`,
+    `<meta\\s+[^>]*(?:property|name)="${esc}"[^>]*content="([^"]+)"[^>]*>`,
     "i"
   );
   const m1 = html.match(re1);
-  if (m1?.[1]) return m1[1].trim();
+  if (m1 && m1[1]) return m1[1].trim();
 
   const re2 = new RegExp(
-    `<meta\\s+[^>]*content="([^"]+)"[^>]*(?:property|name)="${key.replace(/[-/\\^$*+?.()|[\]{}]/g, "\\$&")}"[^>]*>`,
+    `<meta\\s+[^>]*content="([^"]+)"[^>]*(?:property|name)="${esc}"[^>]*>`,
     "i"
   );
   const m2 = html.match(re2);
-  if (m2?.[1]) return m2[1].trim();
+  if (m2 && m2[1]) return m2[1].trim();
 
   return "";
 }
 
 function extractTagsFromImgflipHtml(html) {
-  // Best-effort: find /tags/<slug> links.
   const tags = [];
   const re = /href="\/tags\/([^"\/?#]+)"/gi;
   let m;
@@ -259,9 +293,9 @@ function extractTagsFromImgflipHtml(html) {
 async function getMemeDetails(id) {
   const pageUrl = `https://imgflip.com/i/${id}`;
 
-  // 1) Try scraping the meme page
+  // 1) Scrape meme page
   try {
-    const { status, text } = await fetchText(pageUrl);
+    const { status, text } = await fetchText(pageUrl, FETCH_HEADERS_HTML);
 
     if (status >= 200 && status < 400 && text && !isBotBlockHtml(text)) {
       const ogImage = extractMetaContent(text, "og:image");
@@ -271,33 +305,27 @@ async function getMemeDetails(id) {
 
       const imageUrl = ogImage || "";
       const isGif = imageUrl.toLowerCase().includes(".gif") ? "TRUE" : "FALSE";
-
       const tags = extractTagsFromImgflipHtml(text);
 
-      return {
-        id,
-        pageUrl,
-        imageUrl,
-        isGif,
-        title,
-        tags,
-        source: "page",
-      };
+      return { id, pageUrl, imageUrl, isGif, title, tags, source: "page" };
     } else {
-      warn(`Imgflip page fetch looked blocked or empty for ${id} (status=${status}). Falling back.`);
+      warn(
+        `Imgflip page fetch looked blocked or empty for ${id} (status=${status}). Falling back.`
+      );
     }
   } catch (e) {
     warn(`Imgflip page fetch failed for ${id}. Falling back.`, e?.message || e);
   }
 
-  // 2) Fallback: probe i.imgflip.com for a working asset
-  // Try jpg -> png -> gif.
-  const exts = ["jpg", "png", "gif"];
-  for (const ext of exts) {
+  // 2) Fallback: probe assets
+  for (const ext of ["jpg", "png", "gif"]) {
     const assetUrl = `https://i.imgflip.com/${id}.${ext}`;
     const ok = await headOk(assetUrl);
     if (ok) {
-      const isGif = ext === "gif" || ok.contentType.toLowerCase().includes("gif") ? "TRUE" : "FALSE";
+      const isGif =
+        ext === "gif" || ok.contentType.toLowerCase().includes("gif")
+          ? "TRUE"
+          : "FALSE";
       return {
         id,
         pageUrl,
@@ -310,84 +338,50 @@ async function getMemeDetails(id) {
     }
   }
 
-  // 3) Worst-case: return minimal
-  return {
-    id,
-    pageUrl,
-    imageUrl: "",
-    isGif: "FALSE",
-    title: id,
-    tags: [],
-    source: "none",
-  };
+  return { id, pageUrl, imageUrl: "", isGif: "FALSE", title: id, tags: [], source: "none" };
 }
 
-async function fetchListHtml(url) {
-  const direct = await fetchText(url);
+async function getTopIdsPreferAjax() {
+  log(`Trying AJAX feed: ${IMGFLIP_AJAX_URL}`);
+  const { status, data, text, error } = await fetchJson(IMGFLIP_AJAX_URL);
 
-  if (
-    direct.status >= 200 &&
-    direct.status < 400 &&
-    direct.text &&
-    !isBotBlockHtml(direct.text)
-  ) {
-    return direct;
+  if (status >= 200 && status < 400 && data) {
+    const ids = extractIdsFromJsonAnyShape(data);
+    log(`AJAX feed returned JSON. Found ${ids.length} candidate IDs.`);
+    if (ids.length >= TOP_N) return ids.slice(0, TOP_N);
+    warn(`AJAX feed JSON but only ${ids.length} IDs; need ${TOP_N}.`);
+  } else {
+    if (text && isBotBlockHtml(text)) warn(`AJAX feed appears blocked (status=${status}).`);
+    else warn(`AJAX feed failed (status=${status})${error ? ` err=${error}` : ""}.`);
   }
 
-  warn("List page blocked via fetch; retrying via Playwright…");
-
-  try {
-    const html = await getHtmlViaPlaywright(url);
-    return { status: 200, text: html, finalUrl: url };
-  } catch (e) {
-    return {
-      status: direct.status || 0,
-      text: "",
-      finalUrl: url,
-      error: e?.message || String(e),
-    };
-  }
-}
-
-async function getTopIdsFromListPage() {
+  // Optional fallback: HTML list scraping (best-effort)
+  warn("Falling back to HTML list pages (best-effort)...");
   for (const url of CANDIDATE_LIST_PAGES) {
     log(`Trying list page: ${url}`);
+    const { status: s, text: t, finalUrl } = await fetchText(url, FETCH_HEADERS_HTML);
 
-    const { status, text, finalUrl, error } = await fetchListHtml(url);
-
-    if (!(status >= 200 && status < 400)) {
-      warn(`List page failed. status=${status} url=${finalUrl}${error ? ` err=${error}` : ""}`);
+    if (!(s >= 200 && s < 400)) {
+      warn(`List page failed. status=${s} url=${finalUrl}`);
       continue;
     }
-    if (!text || isBotBlockHtml(text)) {
-      warn(`List page blocked or empty. url=${finalUrl}${error ? ` err=${error}` : ""}`);
+    if (!t || isBotBlockHtml(t)) {
+      warn(`List page blocked or empty. url=${finalUrl}`);
       continue;
     }
 
-    const ids = [];
-    const re = /(?:href=")?https?:\/\/imgflip\.com\/i\/([a-z0-9]+)|href="\/i\/([a-z0-9]+)"/gi;
-    let m;
-    while ((m = re.exec(text)) !== null) {
-      ids.push(m[1] || m[2]);
+    const ids = extractIdsFromHtml(t);
+    if (ids.length >= TOP_N) {
+      log(`List page OK: found ${ids.length} IDs on ${finalUrl}`);
+      return ids.slice(0, TOP_N);
     }
-
-    const uniqueIds = unique(ids);
-    if (uniqueIds.length >= TOP_N) {
-      log(`Found ${uniqueIds.length} IDs on ${finalUrl}`);
-      return uniqueIds.slice(0, TOP_N);
-    }
-
-    warn(`Only found ${uniqueIds.length} IDs on ${finalUrl}; need at least ${TOP_N}. Trying next candidate.`);
+    warn(`Only found ${ids.length} IDs on ${finalUrl}; need ${TOP_N}.`);
   }
 
-  die(
-    `All candidate list pages failed or were blocked. ` +
-    `Tried: ${CANDIDATE_LIST_PAGES.join(" | ")}`
-  );
+  return [];
 }
 
 function ensureHeaders(parsedHeaders) {
-  // If file is empty or has different headers, we still output canonical headers.
   const normalized = (parsedHeaders || []).map((h) => String(h ?? "").trim());
   const ok =
     normalized.length === CSV_HEADERS.length &&
@@ -405,18 +399,17 @@ async function readExistingCsv() {
     const text = await fs.readFile(CSV_PATH, "utf8");
     const parsed = parseCSV(text);
     const headers = ensureHeaders(parsed.headers);
+
     const rows = parsed.rows.map((r) => {
       const obj = toRowObject(parsed.headers.length ? parsed.headers : headers, r);
-      // Ensure all headers exist
       const full = {};
       for (const h of headers) full[h] = obj[h] ?? "";
       return full;
     });
+
     return { headers, rows };
   } catch (e) {
-    if (e?.code === "ENOENT") {
-      return { headers: CSV_HEADERS, rows: [] };
-    }
+    if (e && e.code === "ENOENT") return { headers: CSV_HEADERS, rows: [] };
     throw e;
   }
 }
@@ -424,10 +417,8 @@ async function readExistingCsv() {
 async function writeCsv(headers, rowObjects) {
   const lines = [];
   lines.push(csvLine(headers));
-  for (const obj of rowObjects) {
-    lines.push(csvLine(fromRowObject(headers, obj)));
-  }
-  lines.push(""); // trailing newline
+  for (const obj of rowObjects) lines.push(csvLine(fromRowObject(headers, obj)));
+  lines.push("");
   await fs.writeFile(CSV_PATH, lines.join("\n"), "utf8");
 }
 
@@ -448,53 +439,52 @@ function makeBlankRowForId(id) {
 }
 
 function tagsToCsvString(tags) {
-  // Keep as a single CSV field with comma+space separation
   return tags.join(", ");
 }
 
 async function main() {
-  log(`Using list page: ${IMGFLIP_LIST_PAGE}`);
+  const topIds = await getTopIdsPreferAjax();
 
-  const topIds = await getTopIdsFromListPage();
-  log(`Top ${TOP_N} IDs on page: ${topIds.join(", ")}`);
+  if (!topIds.length) {
+    log("Could not discover top IDs (blocked/unavailable). Skipping update without failing workflow.");
+    process.exit(0);
+  }
+
+  log(`Top ${TOP_N} IDs: ${topIds.join(", ")}`);
 
   const { headers, rows: existingRows } = await readExistingCsv();
 
-  // First 14 IDs in CSV
-  const existingTop = existingRows.slice(0, TOP_N).map((r) => String(r.ID || "").trim()).filter(Boolean);
+  const existingTop = existingRows
+    .slice(0, TOP_N)
+    .map((r) => String(r.ID || "").trim())
+    .filter(Boolean);
 
-  // If CSV already has the same top 14 in the same order, do nothing.
   const identical =
-    existingTop.length === TOP_N &&
-    existingTop.every((id, i) => id === topIds[i]);
+    existingTop.length === TOP_N && existingTop.every((id, i) => id === topIds[i]);
 
   if (identical) {
     log("Top 14 IDs already match. No changes needed.");
     process.exit(0);
   }
 
-  // Determine missing IDs that are in page topIds but not in existingTop
   const missing = topIds.filter((id) => !existingTop.includes(id));
+
   if (missing.length === 0) {
-    // Order changed but same set; update order by moving rows accordingly
-    log("Same IDs but order changed. Reordering top 14 to match page.");
+    log("Same IDs but order changed. Reordering top 14 to match discovered order.");
 
     const byId = new Map(existingRows.map((r) => [String(r.ID || "").trim(), r]));
     const newTopRows = topIds.map((id) => byId.get(id) || makeBlankRowForId(id));
 
-    // Keep the rest of the CSV as-is, excluding any IDs we already placed in top 14 (to avoid duplicates)
     const placed = new Set(topIds);
     const remainder = existingRows.filter((r) => !placed.has(String(r.ID || "").trim()));
 
-    const out = [...newTopRows, ...remainder];
-    await writeCsv(headers, out);
+    await writeCsv(headers, [...newTopRows, ...remainder]);
     log(`Updated memes.csv (reordered top ${TOP_N}).`);
     process.exit(0);
   }
 
   log(`Missing new IDs (to insert at top): ${missing.join(", ")}`);
 
-  // Build new rows for missing IDs with page-derived details
   const newRows = [];
   for (const id of missing) {
     const blank = makeBlankRowForId(id);
@@ -505,39 +495,31 @@ async function main() {
     blank.IS_GIF = normalizeBool(details.isGif);
     blank.TITLE = details.title || id;
 
-    if (details.tags?.length) {
-      // Place tags into TAGS column; user rules around MBTI/keywords can be applied later if needed
-      blank.TAGS = tagsToCsvString(details.tags);
-    }
+    if (details.tags && details.tags.length) blank.TAGS = tagsToCsvString(details.tags);
 
-    // Leave other fields blank for new rows unless you want additional enrichment.
     newRows.push(blank);
 
-    log(`Fetched ${id}: source=${details.source} title="${blank.TITLE}" image="${blank.IMAGE_URL}" gif=${blank.IS_GIF}`);
+    log(
+      `Fetched ${id}: source=${details.source} title="${blank.TITLE}" image="${blank.IMAGE_URL}" gif=${blank.IS_GIF}`
+    );
   }
 
-  // Keep the existing top 14 rows, but only the ones that are still in page topIds (to preserve the “other 12 as is” logic)
   const keepFromExistingTop = existingRows
     .slice(0, TOP_N)
     .filter((r) => topIds.includes(String(r.ID || "").trim()));
 
-  // Now construct final top 14:
-  // - new rows for missing IDs in the page order
-  // - plus the kept existing rows (in the page order)
   const byId = new Map();
   for (const r of newRows) byId.set(String(r.ID).trim(), r);
   for (const r of keepFromExistingTop) byId.set(String(r.ID).trim(), r);
 
   const finalTop14 = topIds.map((id) => byId.get(id) || makeBlankRowForId(id));
 
-  // Remainder: keep everything below the original top 14 as-is,
-  // but remove any IDs that now appear in finalTop14 to avoid duplicates.
   const finalTopSet = new Set(finalTop14.map((r) => String(r.ID || "").trim()));
-  const remainder = existingRows.slice(TOP_N).filter((r) => !finalTopSet.has(String(r.ID || "").trim()));
+  const remainder = existingRows
+    .slice(TOP_N)
+    .filter((r) => !finalTopSet.has(String(r.ID || "").trim()));
 
-  const out = [...finalTop14, ...remainder];
-
-  await writeCsv(headers, out);
+  await writeCsv(headers, [...finalTop14, ...remainder]);
   log(`Updated memes.csv: inserted ${missing.length} new row(s) at the top; preserved remaining rows.`);
 }
 
