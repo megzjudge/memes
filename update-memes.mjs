@@ -293,20 +293,38 @@ async function getMemeDetails(id) {
   };
 }
 
+async function fetchTextWithListFallback(url) {
+  const direct = await fetchText(url);
+  if (
+    direct.status >= 200 &&
+    direct.status < 400 &&
+    direct.text &&
+    !isBotBlockHtml(direct.text)
+  ) {
+    return direct;
+  }
+
+  warn("List page blocked direct; retrying via r.jina.ai proxy…");
+
+  const proxyUrl = `https://r.jina.ai/${url}`;
+  const proxied = await fetchText(proxyUrl);
+
+  return proxied;
+}
+
 async function getTopIdsFromListPage() {
-  const { status, text, finalUrl } = await fetchText(IMGFLIP_LIST_PAGE);
+  const { status, text, finalUrl } = await fetchTextWithListFallback(IMGFLIP_LIST_PAGE);
+
   if (!(status >= 200 && status < 400)) {
     die(`Failed to fetch IMGFLIP_LIST_PAGE (${IMGFLIP_LIST_PAGE}). status=${status}`);
   }
   if (!text || isBotBlockHtml(text)) {
     die(
-      `List page appears blocked (Cloudflare/bot protection). ` +
-        `Try setting IMGFLIP_LIST_PAGE to a different page or use a server-side accessible source. ` +
-        `URL=${finalUrl}`
+      `List page appears blocked (Cloudflare/bot protection) even after proxy. ` +
+      `URL=${finalUrl}`
     );
   }
 
-  // Extract IDs from /i/<id> links
   const ids = [];
   const re = /(?:href=")?https?:\/\/imgflip\.com\/i\/([a-z0-9]+)|href="\/i\/([a-z0-9]+)"/gi;
   let m;
