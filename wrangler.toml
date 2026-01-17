@@ -1,0 +1,13 @@
+name = "memes-discovery"
+main = "worker.js"
+compatibility_date = "2025-12-01"
+
+[triggers]
+crons = ["10 11 * * *"] # 10:10pm Sydney AEDT (11:10 UTC)
+
+[vars]
+IMGFLIP_USERNAME = "mbtininja"
+GITHUB_OWNER = "megzjudge"
+GITHUB_REPO = "memes"
+GITHUB_BRANCH = "main"
+GITHUB_PATH = "latest_ids.json"

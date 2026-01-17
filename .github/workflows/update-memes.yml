@@ -13,15 +13,18 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
       - uses: actions/setup-node@v4
         with:
           node-version: "20"
 
-      - name: Update memes.csv
+      - name: Verify discovery exists (required)
+        run: |
+          test -f latest_ids.json
+          node -e "const j=require('./latest_ids.json'); if(!Array.isArray(j.ids)||j.ids.length<14) process.exit(1); console.log('Discovery OK:', j.ids.slice(0,14).join(','));"
+
+      - name: Update memes.csv from discovery
         run: node update-memes.mjs
-        env:
-          IMGFLIP_USERNAME: mbtininja
-          IMGFLIP_AJAX_URL: https://imgflip.com/ajax_get_user_images?username=mbtininja&sort=latest&page=1
 
       - name: Commit changes if any
         run: |
