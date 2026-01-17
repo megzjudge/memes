@@ -68,7 +68,11 @@ async function getHtmlViaPlaywright(url) {
       locale: "en-AU",
     });
 
-    await page.goto(url, { waitUntil: "networkidle", timeout: 45000 });
+    await page.goto(url, { waitUntil: "domcontentloaded", timeout: 45000 });
+
+    // Give any JS / interstitial a moment to settle
+    await page.waitForTimeout(3000);
+
     return await page.content();
   } finally {
     await browser.close();
