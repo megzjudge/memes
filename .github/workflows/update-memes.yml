@@ -19,6 +19,9 @@ jobs:
 
       - name: Update memes.csv
         run: node update-memes.mjs
+        env:
+          IMGFLIP_USERNAME: mbtininja
+          IMGFLIP_LIST_PAGE: https://imgflip.com/all/user-images/mbtininja?sort=latest
 
       - name: Commit changes if any
         run: |

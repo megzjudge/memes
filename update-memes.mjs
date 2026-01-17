@@ -17,10 +17,10 @@ import process from "node:process";
 
 const CSV_PATH = path.resolve(process.cwd(), "memes.csv");
 
-// Adjust if your “imgflip page” is something else (profile, tag page, etc).
-// This should be the page that shows the newest items you want to track.
-// Example: your user page, a tag page, a gallery page, etc.
-const IMGFLIP_LIST_PAGE = process.env.IMGFLIP_LIST_PAGE || "https://imgflip.com/";
+const IMGFLIP_USERNAME = process.env.IMGFLIP_USERNAME || "mbtininja";
+const IMGFLIP_LIST_PAGE =
+  process.env.IMGFLIP_LIST_PAGE ||
+  `https://imgflip.com/all/user-images/${encodeURIComponent(IMGFLIP_USERNAME)}?sort=latest`;
 
 const TOP_N = 14;
 
@@ -308,10 +308,10 @@ async function getTopIdsFromListPage() {
 
   // Extract IDs from /i/<id> links
   const ids = [];
-  const re = /href="\/i\/([a-z0-9]+)"/gi;
+  const re = /(?:href=")?https?:\/\/imgflip\.com\/i\/([a-z0-9]+)|href="\/i\/([a-z0-9]+)"/gi;
   let m;
   while ((m = re.exec(text)) !== null) {
-    ids.push(m[1]);
+    ids.push(m[1] || m[2]);
   }
 
   const uniqueIds = unique(ids);
