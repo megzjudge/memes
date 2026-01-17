@@ -57,6 +57,24 @@ function die(msg) {
   process.exit(1);
 }
 
+async function getHtmlViaPlaywright(url) {
+  const { chromium } = await import("playwright");
+
+  const browser = await chromium.launch({ headless: true });
+  try {
+    const page = await browser.newPage({
+      userAgent:
+        "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
+      locale: "en-AU",
+    });
+
+    await page.goto(url, { waitUntil: "networkidle", timeout: 45000 });
+    return await page.content();
+  } finally {
+    await browser.close();
+  }
+}
+
 function normalizeBool(v) {
   if (typeof v === "boolean") return v ? "TRUE" : "FALSE";
   const s = String(v ?? "").trim().toLowerCase();
@@ -300,8 +318,9 @@ async function getMemeDetails(id) {
   };
 }
 
-async function fetchTextWithListFallback(url) {
+async function fetchListHtml(url) {
   const direct = await fetchText(url);
+
   if (
     direct.status >= 200 &&
     direct.status < 400 &&
@@ -311,26 +330,33 @@ async function fetchTextWithListFallback(url) {
     return direct;
   }
 
-  warn("List page blocked direct; retrying via r.jina.ai proxy…");
+  warn("List page blocked via fetch; retrying via Playwright…");
 
-  const proxyUrl = `https://r.jina.ai/${url}`;
-  const proxied = await fetchText(proxyUrl);
-
-  return proxied;
+  try {
+    const html = await getHtmlViaPlaywright(url);
+    return { status: 200, text: html, finalUrl: url };
+  } catch (e) {
+    return {
+      status: direct.status || 0,
+      text: "",
+      finalUrl: url,
+      error: e?.message || String(e),
+    };
+  }
 }
 
 async function getTopIdsFromListPage() {
   for (const url of CANDIDATE_LIST_PAGES) {
     log(`Trying list page: ${url}`);
 
-    const { status, text, finalUrl } = await fetchTextWithListFallback(url);
+    const { status, text, finalUrl, error } = await fetchListHtml(url);
 
     if (!(status >= 200 && status < 400)) {
-      warn(`List page failed. status=${status} url=${finalUrl}`);
+      warn(`List page failed. status=${status} url=${finalUrl}${error ? ` err=${error}` : ""}`);
       continue;
     }
     if (!text || isBotBlockHtml(text)) {
-      warn(`List page blocked or empty. url=${finalUrl}`);
+      warn(`List page blocked or empty. url=${finalUrl}${error ? ` err=${error}` : ""}`);
       continue;
     }
 
