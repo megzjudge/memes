@@ -453,6 +453,45 @@ async function main() {
   log(`Top ${TOP_N} IDs: ${topIds.join(", ")}`);
 
   const { headers, rows: existingRows } = await readExistingCsv();
+  // Best-effort enrichment pass for existing top rows even if discovery is blocked.
+  // This helps fill IMAGE_URL / TITLE for rows that currently only have ID.
+  const ENRICH_LIMIT = Number(process.env.ENRICH_LIMIT || 25);
+
+  let enrichedCount = 0;
+  for (let i = 0; i < Math.min(existingRows.length, ENRICH_LIMIT); i++) {
+    const r = existingRows[i];
+    const id = String(r.ID || "").trim();
+    if (!id) continue;
+
+    const needsImage = !String(r.IMAGE_URL || "").trim();
+    const needsTitle = !String(r.TITLE || "").trim() || String(r.TITLE).trim() === id;
+
+    if (!needsImage && !needsTitle) continue;
+
+    const details = await getMemeDetails(id);
+
+    if (needsImage && details.imageUrl) r.IMAGE_URL = details.imageUrl;
+    if (needsTitle && details.title) r.TITLE = details.title;
+
+    // Keep URLs normalized
+    r.URLS = r.URLS || details.pageUrl || `https://imgflip.com/i/${id}`;
+
+    // Normalize boolean
+    r.IS_GIF = normalizeBool(details.isGif);
+
+    // Only fill tags if empty (don’t overwrite curated values)
+    if (!String(r.TAGS || "").trim() && details.tags && details.tags.length) {
+      r.TAGS = tagsToCsvString(details.tags);
+    }
+
+    enrichedCount++;
+    log(`Enriched ${id}: title="${r.TITLE}" image="${r.IMAGE_URL}" gif=${r.IS_GIF}`);
+  }
+
+  if (enrichedCount > 0) {
+    await writeCsv(headers, existingRows);
+    log(`Enriched ${enrichedCount} row(s) in-place near the top of memes.csv.`);
+  }
 
   const existingTop = existingRows
     .slice(0, TOP_N)
