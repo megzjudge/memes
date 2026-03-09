@@ -1,7 +1,6 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import process from "node:process";
-import fetch from "node:fetch"; // Add "node-fetch": "^3.3.2" to package.json if needed (for Node <18)
 
 const TOP_N = 14;
 
@@ -51,11 +50,6 @@ function csvLine(fields) {
   return fields.map(csvEscape).join(",");
 }
 
-/**
- * Simple CSV parser that handles quotes.
- * Returns { headers: string[], rows: string[][] }
- * - Does not attempt to support multi-line quoted fields (not needed for your dataset)
- */
 function parseCSV(text) {
   const rows = [];
   let row = [];
@@ -104,7 +98,6 @@ function parseCSV(text) {
     field += c;
   }
 
-  // flush last
   if (field.length > 0 || row.length > 0) {
     row.push(field);
     rows.push(row);
@@ -137,9 +130,7 @@ function ensureHeaders(parsedHeaders) {
     normalized.every((h, i) => h === CSV_HEADERS[i]);
 
   if (!ok) {
-    warn(
-      "CSV headers missing/mismatched; output will be rewritten with canonical headers."
-    );
+    warn("CSV headers missing/mismatched; rewriting with canonical headers.");
     return CSV_HEADERS;
   }
   return normalized;
@@ -152,13 +143,7 @@ async function readExistingCsv() {
     const headers = ensureHeaders(parsed.headers);
 
     const rows = parsed.rows.map((r) => {
-      // If file had headers, use them to map; otherwise assume canonical
-      const obj = toRowObject(
-        parsed.headers.length ? parsed.headers : headers,
-        r
-      );
-
-      // Ensure all canonical headers exist
+      const obj = toRowObject(parsed.headers.length ? parsed.headers : headers, r);
       const full = {};
       for (const h of headers) full[h] = obj[h] ?? "";
       return full;
@@ -166,7 +151,7 @@ async function readExistingCsv() {
 
     return { headers, rows };
   } catch (e) {
-    if (e && e.code === "ENOENT") return { headers: CSV_HEADERS, rows: [] };
+    if (e.code === "ENOENT") return { headers: CSV_HEADERS, rows: [] };
     throw e;
   }
 }
@@ -177,16 +162,16 @@ async function writeCsv(headers, rowObjects) {
   for (const obj of rowObjects) {
     lines.push(csvLine(fromRowObject(headers, obj)));
   }
-  lines.push(""); // trailing newline
+  lines.push("");
   await fs.writeFile(CSV_PATH, lines.join("\n"), "utf8");
 }
 
-// New: sleep for delays
+// Helper: sleep
 function sleep(ms) {
   return new Promise(r => setTimeout(r, ms));
 }
 
-// New: enrich a blank row with data from Imgflip page
+// Enrich a row with data from Imgflip (only for new rows)
 async function enrichRow(row, id) {
   const url = `https://imgflip.com/i/${id}`;
   try {
@@ -200,54 +185,41 @@ async function enrichRow(row, id) {
 
     if (!res.ok) {
       warn(`Enrich failed for ${id}: HTTP ${res.status}`);
-      return row; // keep default
+      return row;
     }
 
     const html = await res.text();
     const lower = html.toLowerCase();
 
-    // Block check
     if (lower.includes("captcha") || lower.includes("just a moment") || lower.includes("cloudflare")) {
-      warn(`Enrich blocked for ${id}`);
+      warn(`Enrich blocked for ${id} (captcha/cloudflare)`);
       return row;
     }
 
-    // Title from <h1> or __NEXT_DATA__
-    let title = id;
-    const titleMatch = html.match(/<h1 class="base-title"[^>]*>([^<]+)<\/h1>/i); // more precise for Imgflip
+    // Title
+    let title = row.TITLE || id;
+    const titleMatch = html.match(/<h1[^>]*>([^<]+)<\/h1>/i);
     if (titleMatch) title = titleMatch[1].trim();
-    else {
-      const next = extractNextData(html);
-      if (next) {
-        title = getDeep(next, ["props", "pageProps", "image", "title"]) || id;
-      }
-    }
     row.TITLE = title;
 
-    // IMAGE_URL and IS_GIF from og:image or main img src
-    let imageUrl = `https://i.imgflip.com/${id}.jpg`;
-    let isGif = "FALSE";
+    // Image URL & GIF detection
+    let imageUrl = row.IMAGE_URL || `https://i.imgflip.com/${id}.jpg`;
+    let isGif = row.IS_GIF || "FALSE";
     const ogMatch = html.match(/<meta\s+property=["']og:image["']\s+content=["']([^"']+)["']/i);
     if (ogMatch) {
       imageUrl = ogMatch[1].trim();
       isGif = imageUrl.toLowerCase().endsWith('.gif') ? "TRUE" : "FALSE";
-    } else {
-      const imgMatch = html.match(/<img class="base-img" src="([^"]+)"/i);
-      if (imgMatch) {
-        imageUrl = imgMatch[1].trim();
-        isGif = imageUrl.toLowerCase().endsWith('.gif') ? "TRUE" : "FALSE";
-      }
     }
     row.IMAGE_URL = imageUrl;
     row.IS_GIF = isGif;
 
-    // Optional: MEME_TYPE (rough from caption or known patterns)
-    const typeMatch = html.match(/This is a\s+([^<]+)\s+template/i); // example pattern
+    // Rough meme type detection
+    const typeMatch = html.match(/This is a\s+([^<]+?)\s+(meme|template)/i);
     if (typeMatch) row.MEME_TYPE = typeMatch[1].trim();
 
-    log(`Enriched ${id}: TITLE="${title}" | IMAGE_URL="${imageUrl}" | IS_GIF=${isGif} | MEME_TYPE="${row.MEME_TYPE}"`);
+    log(`Enriched ${id}: TITLE="${title}" | IMAGE_URL="${imageUrl}" | IS_GIF=${isGif}`);
 
-    await sleep(1000); // Delay to avoid rate-limit
+    await sleep(2000); // 2s delay to avoid rate-limits/blocks
 
   } catch (err) {
     warn(`Enrich error for ${id}: ${err.message}`);
@@ -256,28 +228,43 @@ async function enrichRow(row, id) {
   return row;
 }
 
-// Updated makeBlankRowForId — now async and enriches
 async function makeBlankRowForId(id) {
   const row = {};
   for (const h of CSV_HEADERS) row[h] = "";
   row.ID = id;
   row.URLS = `https://imgflip.com/i/${id}`;
-  row.IMAGE_URL = `https://i.imgflip.com/${id}.jpg`; // fallback
+  row.IMAGE_URL = `https://i.imgflip.com/${id}.jpg`;
   row.IS_GIF = "FALSE";
   row.TITLE = id;
   row.MEME_TYPE = "";
   row.KYM_SLUG = "";
-  row.MBTI_TYPES = ""; // manual
-  row.KEYWORDS = ""; // manual
-  row.TAGS = ""; // manual
+  row.MBTI_TYPES = "";
+  row.KEYWORDS = "";
+  row.TAGS = "";
 
-  // Enrich
+  // Enrich only new rows
   await enrichRow(row, id);
 
   return row;
 }
 
-// ... rest of the code (parseCSV, readExistingCsv, etc.) remains the same ...
+async function getTopIdsFromDiscovery() {
+  const raw = await fs.readFile(DISCOVERY_PATH, "utf8");
+  const j = JSON.parse(raw);
+
+  const idsRaw =
+    Array.isArray(j?.ids) ? j.ids :
+    Array.isArray(j?.latest_ids) ? j.latest_ids :
+    Array.isArray(j) ? j : [];
+
+  const ids = unique(idsRaw.map((x) => String(x).trim()).filter(Boolean));
+
+  if (ids.length < TOP_N) {
+    die(`Discovery required: ${path.basename(DISCOVERY_PATH)} has ${ids.length} IDs (need ${TOP_N}).`);
+  }
+
+  return ids.slice(0, TOP_N);
+}
 
 async function main() {
   const topIds = await getTopIdsFromDiscovery();
@@ -285,13 +272,11 @@ async function main() {
 
   const { headers, rows: existingRows } = await readExistingCsv();
 
-  // First 14 IDs in CSV
   const existingTop = existingRows
     .slice(0, TOP_N)
     .map((r) => String(r.ID || "").trim())
     .filter(Boolean);
 
-  // If CSV already has the same top 14 in the same order, do nothing.
   const identical =
     existingTop.length === TOP_N &&
     existingTop.every((id, i) => id === topIds[i]);
@@ -301,20 +286,17 @@ async function main() {
     process.exit(0);
   }
 
-  // Determine missing IDs that are in discovery topIds but not in existingTop
   const missing = topIds.filter((id) => !existingTop.includes(id));
 
   if (missing.length === 0) {
-    // Order changed but same set; update order by moving rows accordingly
     log("Same IDs but order changed. Reordering top 14 to match discovery.");
 
-    const byId = new Map(
-      existingRows.map((r) => [String(r.ID || "").trim(), r])
+    const byId = new Map(existingRows.map((r) => [String(r.ID || "").trim(), r]));
+
+    const newTopRows = await Promise.all(
+      topIds.map(async (id) => byId.get(id) || await makeBlankRowForId(id))
     );
 
-    const newTopRows = await Promise.all(topIds.map(async (id) => byId.get(id) || await makeBlankRowForId(id)));
-
-    // Keep the rest of the CSV as-is, excluding any IDs we already placed in top 14 (to avoid duplicates)
     const placed = new Set(topIds);
     const remainder = existingRows.filter(
       (r) => !placed.has(String(r.ID || "").trim())
@@ -327,25 +309,22 @@ async function main() {
 
   log(`Missing new IDs (to insert at top): ${missing.join(", ")}`);
 
-  // Create enriched rows for new IDs
-  const newRows = await Promise.all(missing.map(async (id) => await makeBlankRowForId(id)));
+  const newRows = await Promise.all(
+    missing.map(async (id) => await makeBlankRowForId(id))
+  );
 
-  // Keep the existing top 14 rows, but only the ones that are still in discovery topIds
   const keepFromExistingTop = existingRows
     .slice(0, TOP_N)
     .filter((r) => topIds.includes(String(r.ID || "").trim()));
 
-  // Construct final top 14 in discovery order
   const byId = new Map();
   for (const r of newRows) byId.set(String(r.ID).trim(), r);
   for (const r of keepFromExistingTop) byId.set(String(r.ID).trim(), r);
 
   const finalTop14 = topIds.map(
-    (id) => byId.get(id) || makeBlankRowForId(id) // fallback sync, but shouldn't hit
+    (id) => byId.get(id) || makeBlankRowForId(id)
   );
 
-  // Remainder: keep everything below the original top 14 as-is,
-  // but remove any IDs that now appear in finalTop14 to avoid duplicates.
   const finalTopSet = new Set(finalTop14.map((r) => String(r.ID || "").trim()));
   const remainder = existingRows
     .slice(TOP_N)
@@ -353,7 +332,7 @@ async function main() {
 
   await writeCsv(headers, [...finalTop14, ...remainder]);
   log(
-    `Updated memes.csv: inserted ${missing.length} new enriched row(s) at the top; preserved remaining rows.`
+    `Updated memes.csv: inserted/enriched ${missing.length} new row(s) at the top; preserved remaining rows.`
   );
 }
 
