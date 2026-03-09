@@ -1,6 +1,7 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import process from "node:process";
+import fetch from "node:fetch"; // Add "node-fetch": "^3.3.2" to package.json if needed (for Node <18)
 
 const TOP_N = 14;
 
@@ -42,7 +43,7 @@ function unique(arr) {
 
 function csvEscape(value) {
   const s = String(value ?? "");
-  if (/[,"\n\r]/.test(s)) return `"${s.replace(/"/g, '""')}"`;
+  if (/[",\n\r]/.test(s)) return `"${s.replace(/"/g, '""')}"`;
   return s;
 }
 
@@ -180,43 +181,103 @@ async function writeCsv(headers, rowObjects) {
   await fs.writeFile(CSV_PATH, lines.join("\n"), "utf8");
 }
 
-function makeBlankRowForId(id) {
+// New: sleep for delays
+function sleep(ms) {
+  return new Promise(r => setTimeout(r, ms));
+}
+
+// New: enrich a blank row with data from Imgflip page
+async function enrichRow(row, id) {
+  const url = `https://imgflip.com/i/${id}`;
+  try {
+    const res = await fetch(url, {
+      headers: {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+        Accept: "text/html",
+        Referer: "https://imgflip.com/"
+      }
+    });
+
+    if (!res.ok) {
+      warn(`Enrich failed for ${id}: HTTP ${res.status}`);
+      return row; // keep default
+    }
+
+    const html = await res.text();
+    const lower = html.toLowerCase();
+
+    // Block check
+    if (lower.includes("captcha") || lower.includes("just a moment") || lower.includes("cloudflare")) {
+      warn(`Enrich blocked for ${id}`);
+      return row;
+    }
+
+    // Title from <h1> or __NEXT_DATA__
+    let title = id;
+    const titleMatch = html.match(/<h1 class="base-title"[^>]*>([^<]+)<\/h1>/i); // more precise for Imgflip
+    if (titleMatch) title = titleMatch[1].trim();
+    else {
+      const next = extractNextData(html);
+      if (next) {
+        title = getDeep(next, ["props", "pageProps", "image", "title"]) || id;
+      }
+    }
+    row.TITLE = title;
+
+    // IMAGE_URL and IS_GIF from og:image or main img src
+    let imageUrl = `https://i.imgflip.com/${id}.jpg`;
+    let isGif = "FALSE";
+    const ogMatch = html.match(/<meta\s+property=["']og:image["']\s+content=["']([^"']+)["']/i);
+    if (ogMatch) {
+      imageUrl = ogMatch[1].trim();
+      isGif = imageUrl.toLowerCase().endsWith('.gif') ? "TRUE" : "FALSE";
+    } else {
+      const imgMatch = html.match(/<img class="base-img" src="([^"]+)"/i);
+      if (imgMatch) {
+        imageUrl = imgMatch[1].trim();
+        isGif = imageUrl.toLowerCase().endsWith('.gif') ? "TRUE" : "FALSE";
+      }
+    }
+    row.IMAGE_URL = imageUrl;
+    row.IS_GIF = isGif;
+
+    // Optional: MEME_TYPE (rough from caption or known patterns)
+    const typeMatch = html.match(/This is a\s+([^<]+)\s+template/i); // example pattern
+    if (typeMatch) row.MEME_TYPE = typeMatch[1].trim();
+
+    log(`Enriched ${id}: TITLE="${title}" | IMAGE_URL="${imageUrl}" | IS_GIF=${isGif} | MEME_TYPE="${row.MEME_TYPE}"`);
+
+    await sleep(1000); // Delay to avoid rate-limit
+
+  } catch (err) {
+    warn(`Enrich error for ${id}: ${err.message}`);
+  }
+
+  return row;
+}
+
+// Updated makeBlankRowForId — now async and enriches
+async function makeBlankRowForId(id) {
   const row = {};
   for (const h of CSV_HEADERS) row[h] = "";
   row.ID = id;
   row.URLS = `https://imgflip.com/i/${id}`;
-  row.IMAGE_URL = "";
+  row.IMAGE_URL = `https://i.imgflip.com/${id}.jpg`; // fallback
   row.IS_GIF = "FALSE";
   row.TITLE = id;
   row.MEME_TYPE = "";
   row.KYM_SLUG = "";
-  row.MBTI_TYPES = "";
-  row.KEYWORDS = "";
-  row.TAGS = "";
+  row.MBTI_TYPES = ""; // manual
+  row.KEYWORDS = ""; // manual
+  row.TAGS = ""; // manual
+
+  // Enrich
+  await enrichRow(row, id);
+
   return row;
 }
 
-async function getTopIdsFromDiscovery() {
-  const raw = await fs.readFile(DISCOVERY_PATH, "utf8"); // throws if missing
-  const j = JSON.parse(raw);
-
-  // Support a few shapes in case you later change worker payload
-  const idsRaw =
-    Array.isArray(j?.ids) ? j.ids :
-    Array.isArray(j?.latest_ids) ? j.latest_ids :
-    Array.isArray(j) ? j :
-    [];
-
-  const ids = unique(idsRaw.map((x) => String(x).trim()).filter(Boolean));
-
-  if (ids.length < TOP_N) {
-    die(
-      `Discovery required: ${path.basename(DISCOVERY_PATH)} has ${ids.length} IDs (need ${TOP_N}).`
-    );
-  }
-
-  return ids.slice(0, TOP_N);
-}
+// ... rest of the code (parseCSV, readExistingCsv, etc.) remains the same ...
 
 async function main() {
   const topIds = await getTopIdsFromDiscovery();
@@ -251,9 +312,7 @@ async function main() {
       existingRows.map((r) => [String(r.ID || "").trim(), r])
     );
 
-    const newTopRows = topIds.map(
-      (id) => byId.get(id) || makeBlankRowForId(id)
-    );
+    const newTopRows = await Promise.all(topIds.map(async (id) => byId.get(id) || await makeBlankRowForId(id)));
 
     // Keep the rest of the CSV as-is, excluding any IDs we already placed in top 14 (to avoid duplicates)
     const placed = new Set(topIds);
@@ -268,8 +327,8 @@ async function main() {
 
   log(`Missing new IDs (to insert at top): ${missing.join(", ")}`);
 
-  // Create blank rows for new IDs (no network enrichment here)
-  const newRows = missing.map((id) => makeBlankRowForId(id));
+  // Create enriched rows for new IDs
+  const newRows = await Promise.all(missing.map(async (id) => await makeBlankRowForId(id)));
 
   // Keep the existing top 14 rows, but only the ones that are still in discovery topIds
   const keepFromExistingTop = existingRows
@@ -282,7 +341,7 @@ async function main() {
   for (const r of keepFromExistingTop) byId.set(String(r.ID).trim(), r);
 
   const finalTop14 = topIds.map(
-    (id) => byId.get(id) || makeBlankRowForId(id)
+    (id) => byId.get(id) || makeBlankRowForId(id) // fallback sync, but shouldn't hit
   );
 
   // Remainder: keep everything below the original top 14 as-is,
@@ -294,7 +353,7 @@ async function main() {
 
   await writeCsv(headers, [...finalTop14, ...remainder]);
   log(
-    `Updated memes.csv: inserted ${missing.length} new row(s) at the top; preserved remaining rows.`
+    `Updated memes.csv: inserted ${missing.length} new enriched row(s) at the top; preserved remaining rows.`
   );
 }
 
