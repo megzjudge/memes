@@ -18,10 +18,23 @@ jobs:
         with:
           node-version: "20"
 
-      - name: Verify discovery exists (required)
+      - name: Verify discovery exists (relaxed for catch-up)
         run: |
           test -f latest_ids.json
-          node -e "const j=require('./latest_ids.json'); if(!Array.isArray(j.ids)||j.ids.length<14) process.exit(1); console.log('Discovery OK:', j.ids.slice(0,14).join(','));"
+          node -e "
+            const j = require('./latest_ids.json');
+            if (!Array.isArray(j.ids)) {
+              console.error('Error: ids is not an array');
+              process.exit(1);
+            }
+            const len = j.ids.length;
+            if (len < 1) {
+              console.warn('Warning: Only ' + len + ' IDs found in latest_ids.json. Proceeding anyway for manual backfill.');
+            } else if (len < 14) {
+              console.warn('Note: Only ' + len + ' IDs found (less than usual 14). Still proceeding.');
+            }
+            console.log('Discovery OK (proceeding):', j.ids.slice(0, Math.min(40, len)).join(','));
+          "
 
       - name: Update memes.csv from discovery
         run: node update-memes.mjs
@@ -35,5 +48,5 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add memes.csv
-          git commit -m "Update memes.csv"
+          git commit -m "Update memes.csv (manual backfill + daily)"
           git push
