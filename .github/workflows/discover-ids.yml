@@ -20,7 +20,7 @@ jobs:
           node-version: "20"
 
       - name: Discover latest IDs from Imgflip
-        run: node discover-ids.js
+        run: node discover-ids.mjs  # Change this to discover-ids.mjs if it's the correct filename
 
       - name: Commit latest_ids.json if changed
         run: |
