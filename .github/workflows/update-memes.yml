@@ -1,8 +1,8 @@
-name: Update memes.csv (daily)
+name: Update memes.csv from discovery
 
 on:
   schedule:
-    - cron: "15 11 * * *" # daily at 10:15pm Sydney (AEDT)
+    - cron: "45 11 * * *"   # ~10:45pm AEDT — after discover-ids.yml runs at 10:30pm
   workflow_dispatch: {}
 
 permissions:
@@ -18,9 +18,12 @@ jobs:
         with:
           node-version: "20"
 
-      - name: Verify discovery exists (relaxed for catch-up)
+      - name: Verify discovery file exists
         run: |
-          test -f latest_ids.json
+          test -f latest_ids.json || { echo "Error: latest_ids.json missing!"; exit 1; }
+
+      - name: Check discovery IDs
+        run: |
           node -e "
             const j = require('./latest_ids.json');
             if (!Array.isArray(j.ids)) {
@@ -28,12 +31,8 @@ jobs:
               process.exit(1);
             }
             const len = j.ids.length;
-            if (len < 1) {
-              console.warn('Warning: Only ' + len + ' IDs found in latest_ids.json. Proceeding anyway for manual backfill.');
-            } else if (len < 14) {
-              console.warn('Note: Only ' + len + ' IDs found (less than usual 14). Still proceeding.');
-            }
-            console.log('Discovery OK (proceeding):', j.ids.slice(0, Math.min(40, len)).join(','));
+            console.log('Discovery has ' + len + ' IDs:', j.ids.slice(0, Math.min(20, len)).join(', '));
+            if (len === 0) console.warn('Warning: 0 IDs in discovery — no new rows will be added.');
           "
 
       - name: Update memes.csv from discovery
@@ -42,11 +41,11 @@ jobs:
       - name: Commit changes if any
         run: |
           if git diff --quiet; then
-            echo "No changes."
+            echo "No changes to memes.csv."
             exit 0
           fi
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add memes.csv
-          git commit -m "Update memes.csv (manual backfill + daily)"
+          git commit -m "Update memes.csv from latest discovery"
           git push
