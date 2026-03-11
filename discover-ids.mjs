@@ -1,90 +1,55 @@
-import fs from 'fs/promises';
+// discover-ids.mjs
 
-async function fetchWithRetry(url, maxRetries = 2) {
-  for (let attempt = 1; attempt <= maxRetries; attempt++) {
-    console.log(`Attempt ${attempt}/${maxRetries} fetching: ${url}`);
+import { fetchTextOrThrow, parseCsv, parseJsonArrayCell } from './utils.mjs';  // Assuming these utils exist in your project
+import { extractDataFromPage } from './script.mjs';  // Assuming extractDataFromPage is your scraping function
 
-    try {
-      const res = await fetch(url, {
-        headers: {
-          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0.0.0 Safari/537.36 Edg/129.0.0.0",
-          "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8",
-          "Accept-Language": "en-US,en;q=0.9",
-          "Accept-Encoding": "gzip, deflate, br",
-          "Referer": "https://imgflip.com/",
-          "Connection": "keep-alive",
-          "Upgrade-Insecure-Requests": "1",
-          "Sec-Fetch-Dest": "document",
-          "Sec-Fetch-Mode": "navigate",
-          "Sec-Fetch-Site": "same-origin"
-        }
-      });
+const STATIC_FILE = "/memes.csv";  // Path to your CSV file
+const IMGFLIP_PROFILE_URL = "https://imgflip.com/user/mbtininja";  // Example Imgflip profile URL
 
-      if (!res.ok) {
-        throw new Error(`HTTP ${res.status} - ${res.statusText}`);
-      }
+// Fetch the static CSV file, process it, and update missing fields by scraping data from Imgflip pages
+async function fetchAndFillMissingData() {
+  const staticText = await fetchTextOrThrow(STATIC_FILE);  // Fetch CSV content
+  const staticRows = parseCsv(staticText, ",");  // Parse CSV into rows
 
-      const text = await res.text();
-      console.log("HTML length:", text.length);
-      console.log("First 500 chars:", text.slice(0, 500));
+  // Loop through the rows and check for missing fields (meme_type, title, etc.)
+  for (let row of staticRows) {
+    // If any required field is missing, attempt to extract data from the Imgflip page
+    if (!row.meme_type || !row.title || !row.mbti_types || !row.kym_slug || row.is_gif === undefined) {
+      const pageUrl = row.urls || row.url || `https://imgflip.com/i/${row.id}`;  // If no URL, fallback to Imgflip URL
 
-      const lower = text.toLowerCase();
-      if (lower.includes("just a moment") || lower.includes("cf-challenge") || lower.includes("captcha") || lower.includes("attention required")) {
-        console.warn("Cloudflare/Imgflip challenge detected on attempt " + attempt);
-        await new Promise(r => setTimeout(r, 5000)); // 5s wait before retry
-        continue;
-      }
+      // Fetch the HTML content of the Imgflip page
+      const pageHtml = await fetchPageHtml(pageUrl);
 
-      return text;
-    } catch (err) {
-      console.error(`Fetch error on attempt ${attempt}: ${err.message}`);
-      await new Promise(r => setTimeout(r, 3000)); // 3s wait before next try
+      // Extract necessary fields from the page
+      const pageData = await extractDataFromPage(pageHtml);
+
+      // Update missing fields in the row with the extracted data
+      row.meme_type = row.meme_type || pageData.memeType;
+      row.mbti_types = row.mbti_types || pageData.mbtiTypes;
+      row.kym_slug = row.kym_slug || pageData.kymSlug;
+      row.is_gif = row.is_gif !== undefined ? row.is_gif : pageData.isGif;
+      row.title = row.title || pageData.title;
     }
   }
 
-  throw new Error("All retries failed - likely blocked by Imgflip/Cloudflare");
+  // Return updated rows after filling missing data
+  return staticRows;
 }
 
-async function main() {
-  const username = "mbtininja";
-  const url = `https://imgflip.com/user-images/${encodeURIComponent(username)}?sort=latest`;
-
-  let html;
-  try {
-    html = await fetchWithRetry(url);
-  } catch (err) {
-    console.error("Final fetch failed:", err.message);
-    process.exit(1);
-  }
-
-  const ids = [];
-  const re = /href="\/i\/([a-z0-9]+)"/gi;
-  let m;
-  while ((m = re.exec(html)) !== null) {
-    ids.push(m[1]);
-  }
-
-  const uniqueIds = [...new Set(ids)];
-  console.log("Raw IDs found:", ids.length);
-  console.log("Unique IDs:", uniqueIds);
-
-  if (uniqueIds.length < 5) {
-    console.warn("Too few IDs found - possible block or page structure changed");
-    process.exit(0);
-  }
-
-  const payload = {
-    username,
-    fetched_at: new Date().toISOString(),
-    source: url,
-    ids: uniqueIds.slice(0, 14) // top 14 newest
-  };
-
-  await fs.writeFile("latest_ids.json", JSON.stringify(payload, null, 2) + "\n");
-  console.log("Successfully wrote latest_ids.json with", payload.ids.length, "IDs");
+// Function to fetch the HTML content of an Imgflip page
+async function fetchPageHtml(url) {
+  const res = await fetch(url);
+  const html = await res.text();
+  return html;
 }
 
-main().catch(err => {
-  console.error("Script failed:", err.message);
-  process.exit(1);
-});
+// Write the updated rows to CSV or process them further
+async function writeUpdatedData() {
+  const updatedRows = await fetchAndFillMissingData();
+
+  // You can write the updatedRows back to a new CSV file or process as needed
+  console.log(updatedRows);  // For debugging purposes, logging the updated rows
+}
+
+// Run the update process
+writeUpdatedData().catch(err => console.error("Error updating data:", err));
