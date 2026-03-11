@@ -1,4 +1,4 @@
-const fs = require('fs').promises;
+import fs from 'fs/promises';
 
 async function fetchWithRetry(url, maxRetries = 2) {
   for (let attempt = 1; attempt <= maxRetries; attempt++) {
