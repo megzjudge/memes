@@ -24,7 +24,7 @@ jobs:
       # 3️⃣ Install dependencies including node-fetch
       - name: Install dependencies
         run: |
-          npm install csv-parse csv-stringify node-fetch
+          npm install csv-parse csv-stringify node-fetch papaparse
 
       # 4️⃣ Pull latest remote changes first
       - name: Pull latest main
