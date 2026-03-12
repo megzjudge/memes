@@ -35,6 +35,9 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
 
+          # Pull remote changes first to avoid fast-forward errors
+          git pull --rebase origin main
+
           # Stage the CSV file
           git add memes.csv
 
