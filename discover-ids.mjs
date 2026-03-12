@@ -1,34 +1,18 @@
 // discover-ids.mjs
 
 import fs from "fs/promises";
+import path from "path";
+import { parse } from "csv-parse/sync";
+import { stringify } from "csv-stringify/sync";
 
-const STATIC_FILE = "./memes.csv";
-const OUTPUT_FILE = "./latest_ids.json";
+// Path to your CSV
+const CSV_PATH = path.resolve("./memes.csv");
 
-// Simple CSV parser
-function parseCsv(text) {
-  const lines = text.trim().split("\n");
-  const headers = lines.shift().split(",");
-
-  return lines.map(line => {
-    const values = line.split(",");
-    const obj = {};
-    headers.forEach((h, i) => {
-      obj[h.trim()] = values[i] ? values[i].trim() : "";
-    });
-    return obj;
-  });
-}
-
-// Fetch HTML from a page
+// Simple function to fetch a page
 async function fetchPageHtml(url) {
   try {
     const res = await fetch(url);
-
-    if (!res.ok) {
-      throw new Error(`Failed to fetch ${url} (${res.status})`);
-    }
-
+    if (!res.ok) throw new Error(`Failed to fetch ${url} (${res.status})`);
     return await res.text();
   } catch (err) {
     console.error(`Error fetching ${url}`, err);
@@ -36,70 +20,60 @@ async function fetchPageHtml(url) {
   }
 }
 
-// Basic page extraction (lightweight fallback)
+// Extract meme data from HTML / page content
 function extractDataFromPage(html) {
   if (!html) return {};
 
-  const titleMatch = html.match(/<title>(.*?)<\/title>/i);
-
   return {
-    title: titleMatch ? titleMatch[1].replace(" - Imgflip", "").trim() : "",
-    memeType: "",
-    mbtiTypes: "",
-    kymSlug: "",
-    isGif: html.includes(".gif")
+    TITLE: html.match(/<title>(.*?)<\/title>/i)?.[1].replace(" - Imgflip", "").trim() || "",
+    MEME_TYPE: html.match(/"memeType":"(.*?)"/)?.[1] || "",
+    KYM_SLUG: html.match(/"kymSlug":"(.*?)"/)?.[1] || "",
+    MBTI_TYPES: html.match(/"mbtiTypes":"(.*?)"/)?.[1] || "",
+    IS_GIF: html.includes(".gif") ? "true" : "false",
   };
 }
 
 // Main logic
 async function fetchAndFillMissingData() {
-  const staticText = await fs.readFile(STATIC_FILE, "utf8");
-  const rows = parseCsv(staticText);
+  const fileContent = await fs.readFile(CSV_PATH, "utf-8");
+  const rows = parse(fileContent, { columns: true, skip_empty_lines: true });
 
   for (const row of rows) {
-
     const needsData =
-      !row.meme_type ||
-      !row.title ||
-      !row.mbti_types ||
-      !row.kym_slug ||
-      row.is_gif === "";
+      !row.MEME_TYPE ||
+      !row.TITLE ||
+      !row.MBTI_TYPES ||
+      !row.KYM_SLUG ||
+      row.IS_GIF === "";
 
     if (!needsData) continue;
 
-    const pageUrl =
-      row.urls ||
-      row.url ||
-      `https://imgflip.com/i/${row.id}`;
-
+    const pageUrl = row.URLS || `https://imgflip.com/i/${row.ID}`;
     console.log(`Fetching ${pageUrl}`);
 
     const html = await fetchPageHtml(pageUrl);
     const pageData = extractDataFromPage(html);
 
-    row.meme_type = row.meme_type || pageData.memeType;
-    row.mbti_types = row.mbti_types || pageData.mbtiTypes;
-    row.kym_slug = row.kym_slug || pageData.kymSlug;
-    row.is_gif = row.is_gif || pageData.isGif;
-    row.title = row.title || pageData.title;
+    row.MEME_TYPE = row.MEME_TYPE || pageData.MEME_TYPE;
+    row.MBTI_TYPES = row.MBTI_TYPES || pageData.MBTI_TYPES;
+    row.KYM_SLUG = row.KYM_SLUG || pageData.KYM_SLUG;
+    row.IS_GIF = row.IS_GIF || pageData.IS_GIF;
+    row.TITLE = row.TITLE || pageData.TITLE;
 
-    await new Promise(r => setTimeout(r, 1500)); // polite rate limit
+    // Polite rate limit
+    await new Promise(r => setTimeout(r, 1500));
   }
 
   return rows;
 }
 
-// Write results
-async function writeUpdatedData() {
+// Write updated CSV
+async function writeUpdatedCsv() {
   try {
     const updatedRows = await fetchAndFillMissingData();
-
-    await fs.writeFile(
-      OUTPUT_FILE,
-      JSON.stringify(updatedRows, null, 2)
-    );
-
-    console.log(`Saved ${updatedRows.length} rows to ${OUTPUT_FILE}`);
+    const csvOutput = stringify(updatedRows, { header: true });
+    await fs.writeFile(CSV_PATH, csvOutput, "utf-8");
+    console.log(`CSV updated successfully! (${updatedRows.length} rows)`);
   } catch (err) {
     console.error("Update failed:", err);
     process.exit(1);
@@ -107,4 +81,4 @@ async function writeUpdatedData() {
 }
 
 // Run
-writeUpdatedData();
+writeUpdatedCsv();
