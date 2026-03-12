@@ -1,4 +1,4 @@
-name: Update memes.csv from discovery
+name: Find newly posted memes
 
 on:
   schedule:
