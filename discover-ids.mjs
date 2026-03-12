@@ -25,7 +25,7 @@ function extractDataFromPage(html) {
   if (!html) return {};
 
   return {
-    TITLE: html.match(/<title>(.*?)<\/title>/i)?.[1].replace(" - Imgflip", "").trim() || "",
+    TITLE: html.match(/<title>(.*?)<\/title>/i)?.[1]?.replace(" - Imgflip", "").trim() || "",
     MEME_TYPE: html.match(/"memeType":"(.*?)"/)?.[1] || "",
     KYM_SLUG: html.match(/"kymSlug":"(.*?)"/)?.[1] || "",
     MBTI_TYPES: html.match(/"mbtiTypes":"(.*?)"/)?.[1] || "",
@@ -44,7 +44,7 @@ async function fetchAndFillMissingData() {
       !row.TITLE ||
       !row.MBTI_TYPES ||
       !row.KYM_SLUG ||
-      row.IS_GIF === "";
+      !row.IS_GIF;
 
     if (!needsData) continue;
 
