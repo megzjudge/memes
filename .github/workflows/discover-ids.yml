@@ -21,10 +21,9 @@ jobs:
         with:
           node-version: "20"
 
-      # 3️⃣ Install dependencies (Including papaparse and node-fetch)
+      # 3️⃣ Install dependencies
       - name: Install dependencies
-        run: |
-          npm install csv-parse csv-stringify node-fetch papaparse
+        run: npm install csv-parse csv-stringify
 
       # 4️⃣ Pull latest remote changes first
       - name: Pull latest main
