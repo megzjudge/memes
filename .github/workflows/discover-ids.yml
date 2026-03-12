@@ -25,19 +25,18 @@ jobs:
       - name: Install dependencies
         run: npm install csv-parse csv-stringify
 
-      # 4️⃣ Pull latest remote changes first
-      - name: Pull latest main
-        run: git pull origin main
-
-      # 5️⃣ Run the meme discovery script
+      # 4️⃣ Run the meme discovery script
       - name: Discover missing meme data
         run: node discover-ids.mjs
 
-      # 6️⃣ Commit memes.csv if any changes were made
+      # 5️⃣ Commit memes.csv if any changes were made
       - name: Commit updated memes.csv
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          # Pull remote changes first to avoid fast-forward errors
+          git pull --rebase origin main
 
           # Stage the CSV file
           git add memes.csv
