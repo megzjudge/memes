@@ -2,7 +2,7 @@ name: Find newly posted memes
 
 on:
   schedule:
-    - cron: "45 11 * * *"   # ~10:45pm AEDT — after discover-ids.yml runs at 10:30pm
+    - cron: "00 14 * * *"   # 1:00 AM AEDT (2:00 PM UTC)
   workflow_dispatch: {}
 
 permissions:
@@ -13,7 +13,6 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-
       - uses: actions/setup-node@v4
         with:
           node-version: "20"
