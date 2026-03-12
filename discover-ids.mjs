@@ -1,5 +1,3 @@
-// discover-ids.mjs
-
 import fs from "fs";
 import fetch from "node-fetch";
 import Papa from "papaparse";
@@ -148,12 +146,18 @@ for (const row of rows) {
   // Scrape meme page for data
   const { title, imageUrl, tags, kymSlug } = await scrapePage(row.URLS);
 
+  // Log tags to verify their accuracy
+  console.log("Scraped Tags for", row.TITLE, ": ", tags);
+
   // Process tags to extract MBTI types, meme type, and keywords
   const { mbti, memeType, keywords } = processTags(tags);
 
+  // Log the processed data for tags, MBTI, and meme type
+  console.log("Processed Data -> MBTI:", mbti, "MemeType:", memeType, "Keywords:", keywords);
+
   // Try to scrape the template page for better meme type detection
-  const templateUrl = `https://imgflip.com/memegenerator/${row.MEME_NAME}`;
-  const templateMemeType = await scrapeTemplateMetadata(templateUrl);
+  const templateUrl = row.MEME_TYPE ? `https://imgflip.com/memegenerator/${row.MEME_TYPE}` : '';
+  const templateMemeType = templateUrl ? await scrapeTemplateMetadata(templateUrl) : "";
 
   // Prefer template-based meme type if available
   const finalMemeType = templateMemeType || memeType;
