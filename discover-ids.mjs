@@ -120,39 +120,40 @@ for (const row of rows) {
   if (processed >= MAX_ROWS_PER_RUN) break;
 
   const needsUpdate =
-    !row.image_url ||
-    !row.title ||
-    row.title === row.id ||
-    !row.meme_type ||
-    !row.keywords ||
-    !row.tags ||
-    !row.urls;  // Check if the URL is missing
+    !row.Image_Url ||    // Updated column names to match your CSV
+    !row.Title ||
+    row.Title === row.ID ||
+    !row.Meme_Type ||
+    !row.Keywords ||
+    !row.Tags ||
+    !row.URLs;  // Check if the URL is missing
 
   if (!needsUpdate) continue;
 
   // Scrape meme page for data
-  const { title, imageUrl, tags, kymSlug } = await scrapePage(row.urls);
+  const { title, imageUrl, tags, kymSlug } = await scrapePage(row.URLs);
 
   // Process tags to extract MBTI types, meme type, and keywords
   const { mbti, memeType, keywords } = processTags(tags);
 
   // Try to scrape the template page for better meme type detection
-  const templateUrl = `https://imgflip.com/memegenerator/${row.meme_name}`;
+  const templateUrl = `https://imgflip.com/memegenerator/${row.Meme_Name}`;
   const templateMemeType = await scrapeTemplateMetadata(templateUrl);
 
   // Prefer template-based meme type if available
   const finalMemeType = templateMemeType || memeType;
 
-  if (title) row.title = title;
-  if (imageUrl) row.image_url = imageUrl;
+  // Only update if the data was found
+  if (title) row.Title = title;
+  if (imageUrl) row.Image_Url = imageUrl;
 
-  row.tags = JSON.stringify(tags);
-  row.mbti_types = JSON.stringify(mbti);
-  row.meme_type = finalMemeType;
-  row.keywords = JSON.stringify(keywords);
+  row.Tags = JSON.stringify(tags);
+  row.MBTI_Types = JSON.stringify(mbti);
+  row.Meme_Type = finalMemeType;
+  row.Keywords = JSON.stringify(keywords);
 
-  if (kymSlug && !row.kym_slug) {
-    row.kym_slug = kymSlug;
+  if (kymSlug && !row.KYM_Slug) {
+    row.KYM_Slug = kymSlug;
   }
 
   processed++;
