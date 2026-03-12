@@ -26,11 +26,11 @@ const MEME_TYPE_BLOCKLIST = new Set([
 // HTML decoding
 function decodeHtml(str = "") {
   return str
-    .replace(/&#039;/g, "'")
-    .replace(/&amp;/g, "&")
-    .replace(/&quot;/g, '"')
-    .replace(/&lt;/g, "<")
-    .replace(/&gt;/g, ">");
+    .replace(/&#039;/g, "'")    // Convert &#039; to '
+    .replace(/&amp;/g, "&")      // Convert &amp; to &
+    .replace(/&quot;/g, '"')     // Convert &quot; to "
+    .replace(/&lt;/g, "<")       // Convert &lt; to <
+    .replace(/&gt;/g, ">");      // Convert &gt; to >
 }
 
 // Normalize and deduplicate tags
