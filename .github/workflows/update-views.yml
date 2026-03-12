@@ -1,8 +1,8 @@
-name: Update memes views
+name: Update meme views
 
 on:
   schedule:
-    - cron: "43 0 * * *" # daily at 12:00 UTC
+    - cron: "30 14 * * *"   # 1:30 AM AEDT (2:30 PM UTC)
   workflow_dispatch: {}
 
 permissions:
