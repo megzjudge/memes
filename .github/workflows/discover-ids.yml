@@ -19,8 +19,11 @@ jobs:
         with:
           node-version: "20"
 
+      - name: Install dependencies
+        run: npm install csv-parse csv-stringify
+
       - name: Discover latest IDs from Imgflip
-        run: node discover-ids.mjs  # Change this to discover-ids.mjs if it's the correct filename
+        run: node discover-ids.mjs
 
       - name: Commit latest_ids.json if changed
         run: |
