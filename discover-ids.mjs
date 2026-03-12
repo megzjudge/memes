@@ -63,6 +63,11 @@ function processTags(tags) {
 
 // Scrape the meme page from Imgflip
 async function scrapePage(url) {
+  if (!url) {
+    console.error("Error: URL is undefined or empty.");
+    return { title: "", imageUrl: "", tags: [], kymSlug: "" };
+  }
+
   console.log("Fetching", url);
 
   const res = await fetch(url, {
@@ -120,7 +125,8 @@ for (const row of rows) {
     row.title === row.id ||
     !row.meme_type ||
     !row.keywords ||
-    !row.tags;
+    !row.tags ||
+    !row.urls;  // Check if the URL is missing
 
   if (!needsUpdate) continue;
 
