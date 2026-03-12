@@ -2,7 +2,7 @@ name: Auto-Fill Missing Meme Data in memes.csv
 
 on:
   schedule:
-    - cron: "30 11 * * *"  # ~10:30pm AEDT
+    - cron: "15 14 * * *"  # ~10:30pm AEDT
   workflow_dispatch: {}    # manual trigger
 
 permissions:
