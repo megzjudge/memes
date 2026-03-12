@@ -1,4 +1,4 @@
-name: Update meme_daily_updates.csv
+name: Update memes views
 
 on:
   schedule:
