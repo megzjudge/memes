@@ -1,70 +1,110 @@
 // discover-ids.mjs
 
-// Importing utility functions and scraping helper functions
-import { fetchTextOrThrow, parseCsv, parseJsonArrayCell } from './utils.mjs';  // Assuming these utils exist in your project
-import { extractDataFromPage } from './script.mjs';  // Assuming extractDataFromPage is your scraping function
+import fs from "fs/promises";
 
-const STATIC_FILE = "/memes.csv";  // Path to your CSV file (make sure the file is in the correct path)
-const IMGFLIP_PROFILE_URL = "https://imgflip.com/user/mbtininja";  // Example Imgflip profile URL
+const STATIC_FILE = "./memes.csv";
+const OUTPUT_FILE = "./latest_ids.json";
 
-// Fetch the static CSV file, process it, and update missing fields by scraping data from Imgflip pages
-async function fetchAndFillMissingData() {
-  // Fetch the CSV file
-  const staticText = await fetchTextOrThrow(STATIC_FILE);  // Assuming `fetchTextOrThrow` is defined in utils.mjs
-  const staticRows = parseCsv(staticText, ",");  // Assuming `parseCsv` is defined in utils.mjs
+// Simple CSV parser
+function parseCsv(text) {
+  const lines = text.trim().split("\n");
+  const headers = lines.shift().split(",");
 
-  // Loop through the rows and check for missing fields (meme_type, title, etc.)
-  for (let row of staticRows) {
-    // Check if any required fields are missing
-    if (!row.meme_type || !row.title || !row.mbti_types || !row.kym_slug || row.is_gif === undefined) {
-      // Construct the Imgflip page URL if not provided
-      const pageUrl = row.urls || row.url || `https://imgflip.com/i/${row.id}`;
-
-      // Fetch the HTML content of the Imgflip page
-      const pageHtml = await fetchPageHtml(pageUrl);
-
-      // Extract necessary fields from the page
-      const pageData = await extractDataFromPage(pageHtml);
-
-      // Update missing fields in the row with the extracted data
-      row.meme_type = row.meme_type || pageData.memeType;
-      row.mbti_types = row.mbti_types || pageData.mbtiTypes;
-      row.kym_slug = row.kym_slug || pageData.kymSlug;
-      row.is_gif = row.is_gif !== undefined ? row.is_gif : pageData.isGif;
-      row.title = row.title || pageData.title;
-    }
-  }
-
-  // Return the updated rows after filling in the missing data
-  return staticRows;
+  return lines.map(line => {
+    const values = line.split(",");
+    const obj = {};
+    headers.forEach((h, i) => {
+      obj[h.trim()] = values[i] ? values[i].trim() : "";
+    });
+    return obj;
+  });
 }
 
-// Function to fetch the HTML content of an Imgflip page
+// Fetch HTML from a page
 async function fetchPageHtml(url) {
   try {
     const res = await fetch(url);
+
     if (!res.ok) {
-      throw new Error(`Failed to fetch page: ${url}`);
+      throw new Error(`Failed to fetch ${url} (${res.status})`);
     }
-    const html = await res.text();
-    return html;
+
+    return await res.text();
   } catch (err) {
-    console.error(`Error fetching HTML for ${url}:`, err);
-    throw err; // Rethrow the error after logging
+    console.error(`Error fetching ${url}`, err);
+    return null;
   }
 }
 
-// Write the updated rows to CSV or process them further
+// Basic page extraction (lightweight fallback)
+function extractDataFromPage(html) {
+  if (!html) return {};
+
+  const titleMatch = html.match(/<title>(.*?)<\/title>/i);
+
+  return {
+    title: titleMatch ? titleMatch[1].replace(" - Imgflip", "").trim() : "",
+    memeType: "",
+    mbtiTypes: "",
+    kymSlug: "",
+    isGif: html.includes(".gif")
+  };
+}
+
+// Main logic
+async function fetchAndFillMissingData() {
+  const staticText = await fs.readFile(STATIC_FILE, "utf8");
+  const rows = parseCsv(staticText);
+
+  for (const row of rows) {
+
+    const needsData =
+      !row.meme_type ||
+      !row.title ||
+      !row.mbti_types ||
+      !row.kym_slug ||
+      row.is_gif === "";
+
+    if (!needsData) continue;
+
+    const pageUrl =
+      row.urls ||
+      row.url ||
+      `https://imgflip.com/i/${row.id}`;
+
+    console.log(`Fetching ${pageUrl}`);
+
+    const html = await fetchPageHtml(pageUrl);
+    const pageData = extractDataFromPage(html);
+
+    row.meme_type = row.meme_type || pageData.memeType;
+    row.mbti_types = row.mbti_types || pageData.mbtiTypes;
+    row.kym_slug = row.kym_slug || pageData.kymSlug;
+    row.is_gif = row.is_gif || pageData.isGif;
+    row.title = row.title || pageData.title;
+
+    await new Promise(r => setTimeout(r, 1500)); // polite rate limit
+  }
+
+  return rows;
+}
+
+// Write results
 async function writeUpdatedData() {
   try {
     const updatedRows = await fetchAndFillMissingData();
 
-    // You can write the updatedRows back to a new CSV file or process as needed
-    console.log(updatedRows);  // For debugging purposes, logging the updated rows
+    await fs.writeFile(
+      OUTPUT_FILE,
+      JSON.stringify(updatedRows, null, 2)
+    );
+
+    console.log(`Saved ${updatedRows.length} rows to ${OUTPUT_FILE}`);
   } catch (err) {
-    console.error("Error updating data:", err);
+    console.error("Update failed:", err);
+    process.exit(1);
   }
 }
 
-// Run the update process
+// Run
 writeUpdatedData();
