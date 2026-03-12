@@ -109,10 +109,25 @@ async function scrapeTemplateMetadata(templateUrl) {
   return memeType;
 }
 
+// Normalize CSV headers to upper case
+function normalizeHeaders(rows) {
+  const firstRow = rows[0];
+  return rows.map(row => {
+    const normalizedRow = {};
+    for (const [key, value] of Object.entries(row)) {
+      const normalizedKey = key.trim().toUpperCase();
+      normalizedRow[normalizedKey] = value;
+    }
+    return normalizedRow;
+  });
+}
+
 // Main CSV enrichment process
 const csvText = fs.readFileSync(CSV_FILE, "utf8");
 const parsed = Papa.parse(csvText, { header: true });
-const rows = parsed.data;
+let rows = parsed.data;
+
+rows = normalizeHeaders(rows);  // Ensure all headers are uppercased
 
 let processed = 0;
 
@@ -120,40 +135,40 @@ for (const row of rows) {
   if (processed >= MAX_ROWS_PER_RUN) break;
 
   const needsUpdate =
-    !row.Image_Url ||    // Updated column names to match your CSV
-    !row.Title ||
-    row.Title === row.ID ||
-    !row.Meme_Type ||
-    !row.Keywords ||
-    !row.Tags ||
-    !row.URLs;  // Check if the URL is missing
+    !row.IMAGE_URL ||    // Updated column names to match your CSV (all caps)
+    !row.TITLE ||
+    row.TITLE === row.ID ||
+    !row.MEME_TYPE ||
+    !row.KEYWORDS ||
+    !row.TAGS ||
+    !row.URLS;  // Check if the URL is missing
 
   if (!needsUpdate) continue;
 
   // Scrape meme page for data
-  const { title, imageUrl, tags, kymSlug } = await scrapePage(row.URLs);
+  const { title, imageUrl, tags, kymSlug } = await scrapePage(row.URLS);
 
   // Process tags to extract MBTI types, meme type, and keywords
   const { mbti, memeType, keywords } = processTags(tags);
 
   // Try to scrape the template page for better meme type detection
-  const templateUrl = `https://imgflip.com/memegenerator/${row.Meme_Name}`;
+  const templateUrl = `https://imgflip.com/memegenerator/${row.MEME_NAME}`;
   const templateMemeType = await scrapeTemplateMetadata(templateUrl);
 
   // Prefer template-based meme type if available
   const finalMemeType = templateMemeType || memeType;
 
   // Only update if the data was found
-  if (title) row.Title = title;
-  if (imageUrl) row.Image_Url = imageUrl;
+  if (title) row.TITLE = title;
+  if (imageUrl) row.IMAGE_URL = imageUrl;
 
-  row.Tags = JSON.stringify(tags);
-  row.MBTI_Types = JSON.stringify(mbti);
-  row.Meme_Type = finalMemeType;
-  row.Keywords = JSON.stringify(keywords);
+  row.TAGS = JSON.stringify(tags);
+  row.MBTI_TYPES = JSON.stringify(mbti);
+  row.MEME_TYPE = finalMemeType;
+  row.KEYWORDS = JSON.stringify(keywords);
 
-  if (kymSlug && !row.KYM_Slug) {
-    row.KYM_Slug = kymSlug;
+  if (kymSlug && !row.KYM_SLUG) {
+    row.KYM_SLUG = kymSlug;
   }
 
   processed++;
