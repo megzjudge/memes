@@ -3,7 +3,7 @@ import fetch from "node-fetch";
 import Papa from "papaparse";
 
 const CSV_FILE = "memes.csv";
-const MAX_ROWS_PER_RUN = 34;  // Process only the first 14 rows
+const MAX_ROWS_PER_RUN = 34;  // Process only the first 34 rows
 
 const MBTI_TYPES = [
   "ESTP", "ISTP", "ESFP", "ISFP",
@@ -82,9 +82,11 @@ async function scrapePage(url) {
     const imageMatch = html.match(/property="og:image" content="([^"]+)"/i);
     const imageUrl = imageMatch ? imageMatch[1] : "";
 
-    // Extract tags using the correct format
-    const tagMatches = [...html.matchAll(/href='\/tag\/([^']+)'/g)];
-    const tags = normalizeTags(tagMatches.map(m => m[1])); // Normalize tags into a string
+    // Extract tags using both /tag/ and /meme/
+    const tagMatches = [
+      ...html.matchAll(/href='\/(tag|meme)\/([^']+)'/g)
+    ];
+    const tags = normalizeTags(tagMatches.map(m => m[2])); // Get only the tag names, excluding /tag/ and /meme/
 
     // Log the raw tag data for debugging
     if (tags.length === 0) {
