@@ -60,7 +60,10 @@ function processTags(tags) {
     return true;
   });
 
-  return { mbti, memeType, keywords };
+  // Remove dashes from the keywords as well
+  const cleanedKeywords = keywords.map(k => k.replace(/-/g, " "));
+
+  return { mbti, memeType, keywords: cleanedKeywords };
 }
 
 // Scrape the meme page from Imgflip
@@ -162,8 +165,10 @@ for (const row of rows.slice(0, MAX_ROWS_PER_RUN)) {
   row.MEME_TYPE = memeType.replace(/-/g, " ");
   row.TAGS = tags.replace(/-/g, " ");
 
+  // Remove dashes from the keywords field
+  row.KEYWORDS = keywords.join(', ').replace(/-/g, " ");
+
   row.MBTI_TYPES = mbti.join(', '); // Join MBTI types into a comma-separated string
-  row.KEYWORDS = keywords.join(', ');  // Join keywords into a comma-separated string
 
   if (kymSlug && !row.KYM_SLUG) {
     row.KYM_SLUG = kymSlug;
