@@ -113,7 +113,6 @@ async function scrapePage(url) {
       console.error("Error: No tags found on the page.");
     }
 
-    // Extract KnowYourMeme slug from link
     const kymMatch = html.match(/knowyourmeme.com\/memes\/([^"\/]+)/i);
     const kymSlug = kymMatch ? kymMatch[1] : "";
 
@@ -125,7 +124,7 @@ async function scrapePage(url) {
   }
 }
 
-// Scrape the meme template metadata (meme classification improvement)
+// Scrape the template page from Imgflip (metadata)
 async function scrapeTemplateMetadata(templateUrl) {
   console.log("Fetching template metadata", templateUrl);
 
@@ -141,7 +140,6 @@ async function scrapeTemplateMetadata(templateUrl) {
 
     const html = await res.text();
 
-    // Template-specific meme metadata (meme category, name)
     const memeTypeMatch = html.match(/"meme_name":"(.*?)"/i);
     const memeType = memeTypeMatch ? decodeHtml(memeTypeMatch[1]) : "";
 
@@ -183,35 +181,19 @@ console.log(`Processing ${last14Rows.length} rows`);
 for (const row of last14Rows) {
   if (processed >= MAX_ROWS_PER_RUN) break;
 
-  const needsUpdate =
-    !row.IMAGE_URL ||    // Updated column names to match your CSV (all caps)
-    !row.TITLE ||
-    row.TITLE === row.ID ||
-    !row.MEME_TYPE ||
-    !row.KEYWORDS ||
-    !row.TAGS ||
-    !row.URLS;  // Make sure to check the 'URLS' column, as per your request
+  // Ensure the URLS column has the correct format
+  const expectedUrl = `https://imgflip.com/i/${row.ID}`;
+  if (row.URLS !== expectedUrl) {
+    console.error(`Error: URLS does not match expected format for row with ID: ${row.ID}`);
+    console.error(`Expected: ${expectedUrl}, Found: ${row.URLS}`);
+    continue;  // Skip this row if the URL format is incorrect
+  }
 
-  if (!needsUpdate) continue;
-
-  // **Debugging Log for GitHub Actions**
   console.log(`Processing row with ID: ${row.ID}`);
   console.log(`URLS column value: ${row.URLS}`);
 
-  // Check if the URL is empty
-  if (!row.URLS || row.URLS.trim() === "") {
-    console.error(`Error: URLS is empty for row with ID: ${row.ID}`);
-    continue;  // Skip this row if URL is empty
-  }
-
-  // Scrape meme page for data using the correct column name `URLS`
-  const { title, imageUrl, tags, kymSlug } = await scrapePage(row.URLS);  // Using row.URLS
-
-  // Check if the data was fetched
-  if (!title || !imageUrl || tags.length === 0) {
-    console.error(`Error: Failed to scrape data for row with ID: ${row.ID}`);
-    continue;  // Skip the row if any important data is missing
-  }
+  // Scrape meme page for data
+  const { title, imageUrl, tags, kymSlug } = await scrapePage(row.URLS);
 
   // Log tags to verify their accuracy
   console.log("Scraped Tags for", row.TITLE, ": ", tags);
@@ -222,25 +204,11 @@ for (const row of last14Rows) {
   // Log the processed data for tags, MBTI, and meme type
   console.log("Processed Data -> MBTI:", mbti, "MemeType:", memeType, "Keywords:", keywords);
 
-  // Check for failure to extract MBTI types
-  if (mbti.length === 0) {
-    console.warn(`Warning: No MBTI types extracted for row with ID: ${row.ID}`);
-  }
-
-  // Check for failure to extract meme type
-  if (!memeType) {
-    console.warn(`Warning: No meme type extracted for row with ID: ${row.ID}`);
-  }
-
-  // Check for failure to extract keywords
-  if (keywords.length === 0) {
-    console.warn(`Warning: No keywords extracted for row with ID: ${row.ID}`);
-  }
-
   // Try to scrape the template page for better meme type detection
   const templateUrl = row.MEME_TYPE ? `https://imgflip.com/memegenerator/${row.MEME_TYPE}` : '';
   const templateMemeType = templateUrl ? await scrapeTemplateMetadata(templateUrl) : "";
 
+  // Prefer template-based meme type if available
   // Prefer template-based meme type if available
   const finalMemeType = templateMemeType || memeType;
 
