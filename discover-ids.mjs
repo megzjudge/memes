@@ -66,60 +66,54 @@ async function scrapePage(url) {
     return { title: "", imageUrl: "", tags: [], kymSlug: "" };
   }
 
-  try {
-    const res = await fetch(url, { headers: { "user-agent": "Mozilla/5.0" } });
-    if (!res.ok) {
-      console.error(`Failed to fetch ${url}: ${res.statusText}`);
-      return { title: "", imageUrl: "", tags: [], kymSlug: "" };
-    }
+  console.log("Fetching", url);
 
-    const html = await res.text();
+  const res = await fetch(url, {
+    headers: { "user-agent": "Mozilla/5.0" }
+  });
 
-    const titleMatch = html.match(/<title>(.*?)<\/title>/i);
-    const title = titleMatch ? decodeHtml(titleMatch[1].replace(" - Imgflip", "").trim()) : "";
+  const html = await res.text();
 
-    const imageMatch = html.match(/property="og:image" content="([^"]+)"/i);
-    const imageUrl = imageMatch ? imageMatch[1] : "";
+  const titleMatch = html.match(/<title>(.*?)<\/title>/i);
+  const title = titleMatch ? decodeHtml(titleMatch[1].replace(" - Imgflip", "").trim()) : "";
 
-    const tagMatches = [...html.matchAll(/class="tag".*?>(.*?)</g)];
-    const tags = normalizeTags(tagMatches.map(m => m[1]));
+  const imageMatch = html.match(/property="og:image" content="([^"]+)"/i);
+  const imageUrl = imageMatch ? imageMatch[1] : "";
 
-    // Extract KnowYourMeme slug from link
-    const kymMatch = html.match(/knowyourmeme.com\/memes\/([^"\/]+)/i);
-    const kymSlug = kymMatch ? kymMatch[1] : "";
+  const tagMatches = [...html.matchAll(/class="tag".*?>(.*?)</g)];
+  const tags = normalizeTags(tagMatches.map(m => m[1]));
 
-    return { title, imageUrl, tags, kymSlug };
-  } catch (err) {
-    console.error(`Error fetching URL ${url}: ${err.message}`);
-    return { title: "", imageUrl: "", tags: [], kymSlug: "" };
-  }
+  // Extract KnowYourMeme slug from link
+  const kymMatch = html.match(/knowyourmeme.com\/memes\/([^"\/]+)/i);
+  const kymSlug = kymMatch ? kymMatch[1] : "";
+
+  return { title, imageUrl, tags, kymSlug };
 }
 
 // Scrape the meme template metadata (meme classification improvement)
 async function scrapeTemplateMetadata(templateUrl) {
   console.log("Fetching template metadata", templateUrl);
 
-  try {
-    const res = await fetch(templateUrl, { headers: { "user-agent": "Mozilla/5.0" } });
-    const html = await res.text();
+  const res = await fetch(templateUrl, {
+    headers: { "user-agent": "Mozilla/5.0" }
+  });
 
-    // Template-specific meme metadata (meme category, name)
-    const memeTypeMatch = html.match(/"meme_name":"(.*?)"/i);
-    const memeType = memeTypeMatch ? decodeHtml(memeTypeMatch[1]) : "";
+  const html = await res.text();
 
-    return memeType;
-  } catch (err) {
-    console.error(`Error fetching template metadata for ${templateUrl}: ${err.message}`);
-    return "";
-  }
+  // Template-specific meme metadata (meme category, name)
+  const memeTypeMatch = html.match(/"meme_name":"(.*?)"/i);
+  const memeType = memeTypeMatch ? decodeHtml(memeTypeMatch[1]) : "";
+
+  return memeType;
 }
 
 // Normalize CSV headers to upper case
 function normalizeHeaders(rows) {
+  const firstRow = rows[0];
   return rows.map(row => {
     const normalizedRow = {};
     for (const [key, value] of Object.entries(row)) {
-      const normalizedKey = key.trim().toUpperCase().replace(/[^a-zA-Z0-9_]/g, "_");  // Removes special characters
+      const normalizedKey = key.trim().toUpperCase();
       normalizedRow[normalizedKey] = value;
     }
     return normalizedRow;
@@ -133,10 +127,10 @@ let rows = parsed.data;
 
 rows = normalizeHeaders(rows);  // Ensure all headers are uppercased
 
-// Get the last 14 rows
-const last14Rows = rows.slice(-14);  // This ensures you're only working with the last 14 rows
-
 let processed = 0;
+
+// Only process the last 14 rows
+const last14Rows = rows.slice(-14);
 
 for (const row of last14Rows) {
   if (processed >= MAX_ROWS_PER_RUN) break;
@@ -148,12 +142,12 @@ for (const row of last14Rows) {
     !row.MEME_TYPE ||
     !row.KEYWORDS ||
     !row.TAGS ||
-    !row.URLS;  // Check if the URL is missing
+    !row.URLS;  // Make sure to check the 'URLS' column, as per your request
 
   if (!needsUpdate) continue;
 
-  // Scrape meme page for data
-  const { title, imageUrl, tags, kymSlug } = await scrapePage(row.URLS);
+  // Scrape meme page for data using the correct column name `URLS`
+  const { title, imageUrl, tags, kymSlug } = await scrapePage(row.URLS);  // Using row.URLS
 
   // Log tags to verify their accuracy
   console.log("Scraped Tags for", row.TITLE, ": ", tags);
