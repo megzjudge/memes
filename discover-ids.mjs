@@ -3,7 +3,7 @@ import fetch from "node-fetch";
 import Papa from "papaparse";
 
 const CSV_FILE = "memes.csv";
-const MAX_ROWS_PER_RUN = 14;  // Process only the first 14 rows
+const MAX_ROWS_PER_RUN = 34;  // Process only the first 14 rows
 
 const MBTI_TYPES = [
   "ESTP", "ISTP", "ESFP", "ISFP",
@@ -119,21 +119,21 @@ const csvText = fs.readFileSync(CSV_FILE, "utf8");
 const parsed = Papa.parse(csvText, { header: true });
 let rows = parsed.data;
 
-rows = normalizeHeaders(rows);  // Ensure all headers are uppercased
+rows = normalizeHeaders(rows);
 
 let processed = 0;
 
-for (const row of rows.slice(0, MAX_ROWS_PER_RUN)) {  // Process only the first 14 rows
+for (const row of rows.slice(0, MAX_ROWS_PER_RUN)) {
   if (processed >= MAX_ROWS_PER_RUN) break;
 
   const needsUpdate =
-    !row.IMAGE_URL ||    // Updated column names to match your CSV (all caps)
+    !row.IMAGE_URL ||
     !row.TITLE ||
     row.TITLE === row.ID ||
     !row.MEME_TYPE ||
     !row.KEYWORDS ||
     !row.TAGS ||
-    !row.URLS;  // Check if the URL is missing
+    !row.URLS;
 
   if (!needsUpdate) continue;
 
