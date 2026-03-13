@@ -51,6 +51,9 @@ function processTags(tags) {
     }
   }
 
+  // Remove any "-" characters from the memeType
+  memeType = memeType.replace(/-/g, " ");  // Replace dashes with spaces (or use "" to remove)
+
   const keywords = tags.filter(t => {
     if (MBTI_SET.has(t.toUpperCase())) return false;
     if (t === memeType) return false;
