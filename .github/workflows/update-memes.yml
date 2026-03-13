@@ -17,10 +17,6 @@ jobs:
         with:
           node-version: "20"
 
-      - name: Verify discovery file exists
-        run: |
-          test -f latest_ids.json || { echo "Error: latest_ids.json missing!"; exit 1; }
-
       - name: Check discovery IDs
         run: |
           node -e "
