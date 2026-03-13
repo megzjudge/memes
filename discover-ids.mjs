@@ -1,181 +1,103 @@
-import fs from "fs";
-import fetch from "node-fetch";
-import Papa from "papaparse";
+const fs = require("fs");
+const Papa = require("papaparse");
+const fetch = require("node-fetch");
+const git = require("simple-git")();
 
 const CSV_FILE = "memes.csv";
-const MAX_ROWS_PER_RUN = 14; // Process only the first 14 rows
+const MAX_ROWS_PER_RUN = 100; // Define how many rows to process per run
+const GITHUB_REPO_URL = "https://github.com/megzjudge/memes";
 
-const MBTI_TYPES = [
-  "ESTP", "ISTP", "ESFP", "ISFP",
-  "ESTJ", "ISTJ", "ESFJ", "ISFJ",
-  "ENFP", "INFP", "ENFJ", "INFJ",
-  "ENTJ", "INTJ", "ENTP", "INTP"
-];
+// Helper function to log changes
+const logRowChanges = (row) => {
+  console.log(`Row ${row.ID} needs an update:`, row);
+};
 
-const MBTI_SET = new Set(MBTI_TYPES);
+// Read the CSV file and parse it into rows
+const parseCSV = () => {
+  const fileContent = fs.readFileSync(CSV_FILE, "utf8");
+  return Papa.parse(fileContent, { header: true }).data;
+};
 
-const MEME_TYPE_BLOCKLIST = new Set([
-  "memes",
-  "mbti",
-  "myers briggs",
-  "personality"
-]);
+// Fetch data for a meme from the given URL
+const fetchMemeData = async (url) => {
+  const response = await fetch(url);
+  const html = await response.text();
 
-// HTML decoding
-function decodeHtml(str = "") {
-  return str
-    .replace(/&#039;/g, "'")    // Convert &#039; to '
-    .replace(/&amp;/g, "&")      // Convert &amp; to &
-    .replace(/&quot;/g, '"')     // Convert &quot; to "
-    .replace(/&lt;/g, "<")       // Convert &lt; to <
-    .replace(/&gt;/g, ">");      // Convert &gt; to >
-}
+  // Extract tags from the page (you can customize this part depending on the structure of the page)
+  const matches = html.match(/<meta name="keywords" content="([^"]+)"/);
+  const tags = matches ? matches[1].split(",") : [];
+  
+  return tags;
+};
 
-// Normalize and deduplicate tags
-function normalizeTags(tags) {
-  return [...new Set(
-    tags.map(t => t.toLowerCase().trim()).filter(Boolean)
-  )];
-}
+// Process rows from CSV and check for updates
+const processMemeData = async (rows) => {
+  let processed = 0;
 
-// Process tags to detect MBTI, Meme Type, and Keywords
-function processTags(tags) {
-  const mbti = tags.filter(t => MBTI_SET.has(t.toUpperCase()));
+  for (const row of rows.slice(0, MAX_ROWS_PER_RUN)) {
+    if (processed >= MAX_ROWS_PER_RUN) break;
 
-  let memeType = "";
-  for (const t of tags) {
-    if (!MBTI_SET.has(t.toUpperCase()) && !MEME_TYPE_BLOCKLIST.has(t)) {
-      memeType = t;
-      break;
-    }
-  }
+    // Check the 'needsUpdate' condition for each row
+    const needsUpdate =
+      !row.IMAGE_URL ||
+      !row.TITLE ||
+      row.TITLE === row.ID ||
+      !row.MEME_TYPE ||
+      !row.KEYWORDS ||
+      !row.TAGS ||
+      !row.URLS;
 
-  const keywords = tags.filter(t => {
-    if (MBTI_SET.has(t.toUpperCase())) return false;
-    if (t === memeType) return false;
-    return true;
-  });
-
-  return { mbti, memeType, keywords };
-}
-
-// Scrape the meme page from Imgflip
-async function scrapePage(url) {
-  if (!url) {
-    console.error("Error: URL is undefined or empty.");
-    return { title: "", imageUrl: "", tags: [], kymSlug: "" };
-  }
-
-  console.log("Fetching", url);
-
-  try {
-    const res = await fetch(url, {
-      headers: { "user-agent": "Mozilla/5.0" }
-    });
-
-    const html = await res.text();
-
-    const titleMatch = html.match(/<title>(.*?)<\/title>/i);
-    const title = titleMatch ? decodeHtml(titleMatch[1].replace(" - Imgflip", "").trim()) : "";
-
-    const imageMatch = html.match(/property="og:image" content="([^"]+)"/i);
-    const imageUrl = imageMatch ? imageMatch[1] : "";
-
-    // Extract tags using the correct format
-    const tagMatches = [...html.matchAll(/href='\/tag\/([^']+)'/g)];
-    const tags = normalizeTags(tagMatches.map(m => m[1]));
-
-    // Log the raw tag data for debugging
-    if (tags.length === 0) {
-      console.error(`No tags found for ${url}. The HTML structure may have changed.`);
+    // Debug: Log the row and whether it needs an update
+    if (needsUpdate) {
+      logRowChanges(row); // Log why it needs an update
+    } else {
+      console.log(`Row ${row.ID} does not need an update.`);
     }
 
-    // Extract KnowYourMeme slug from link
-    const kymMatch = html.match(/knowyourmeme.com\/memes\/([^"\/]+)/i);
-    const kymSlug = kymMatch ? kymMatch[1] : "";
+    if (needsUpdate) continue;  // Skip rows that don't need an update
 
-    return { title, imageUrl, tags, kymSlug };
-  } catch (error) {
-    console.error("Error fetching data for URL:", url, error);
-    return { title: "", imageUrl: "", tags: [], kymSlug: "" };
-  }
-}
+    // Fetch the meme data (tags)
+    const tags = await fetchMemeData(row.URLS);
 
-// Normalize CSV headers to upper case
-function normalizeHeaders(rows) {
-  const firstRow = rows[0];
-  return rows.map(row => {
-    const normalizedRow = {};
-    for (const [key, value] of Object.entries(row)) {
-      const normalizedKey = key.trim().toUpperCase();
-      normalizedRow[normalizedKey] = value;
-    }
-    return normalizedRow;
-  });
-}
+    // Update the row with new tags
+    row.TAGS = JSON.stringify(tags);
 
-// Main CSV enrichment process
-const csvText = fs.readFileSync(CSV_FILE, "utf8");
-const parsed = Papa.parse(csvText, { header: true });
-let rows = parsed.data;
-
-rows = normalizeHeaders(rows);  // Ensure all headers are uppercased
-
-let processed = 0;
-
-for (const row of rows.slice(0, MAX_ROWS_PER_RUN)) {  // Process only the first 14 rows
-  if (processed >= MAX_ROWS_PER_RUN) break;
-
-  const needsUpdate =
-    !row.IMAGE_URL ||    // Updated column names to match your CSV (all caps)
-    !row.TITLE ||
-    row.TITLE === row.ID ||
-    !row.MEME_TYPE ||
-    !row.KEYWORDS ||
-    !row.TAGS ||
-    !row.URLS;  // Check if the URL is missing
-
-  if (!needsUpdate) continue;
-
-  // Scrape meme page for data
-  const { title, imageUrl, tags, kymSlug } = await scrapePage(row.URLS);
-
-  // Log tags to verify their accuracy
-  console.log("Scraped Tags for", row.TITLE, ": ", tags);
-
-  // Process tags to extract MBTI types, meme type, and keywords
-  const { mbti, memeType, keywords } = processTags(tags);
-
-  // Log the processed data for tags, MBTI, and meme type
-  console.log("Processed Data -> MBTI:", mbti, "MemeType:", memeType, "Keywords:", keywords);
-
-  // Only update if the data was found
-  if (title) row.TITLE = title;
-  if (imageUrl) row.IMAGE_URL = imageUrl;
-
-  row.TAGS = JSON.stringify(tags);
-  row.MBTI_TYPES = JSON.stringify(mbti);
-  row.MEME_TYPE = memeType;
-  row.KEYWORDS = JSON.stringify(keywords);
-
-  if (kymSlug && !row.KYM_SLUG) {
-    row.KYM_SLUG = kymSlug;
+    processed++;
   }
 
-  processed++;
-}
+  return rows;
+};
 
-// Log the state of rows before writing to ensure all data is processed
-console.log("Processed rows:", rows.slice(0, MAX_ROWS_PER_RUN));
+// Save updated data back to CSV file
+const saveCSV = (rows) => {
+  const newCsv = Papa.unparse(rows);
 
-// Write updated rows back to CSV
-const newCsv = Papa.unparse(rows);
-fs.writeFileSync(CSV_FILE, newCsv, 'utf8', (err) => {
-  if (err) {
-    console.error("Error writing to CSV file:", err);
+  // Log the new CSV content to compare
+  console.log("New CSV content (first 200 chars):", newCsv.slice(0, 200));
+
+  const originalCsv = fs.readFileSync(CSV_FILE, "utf8");
+
+  // Only save if there are changes
+  if (originalCsv !== newCsv) {
+    fs.writeFileSync(CSV_FILE, newCsv, "utf8");
+    console.log("Changes detected. Updating CSV.");
+    git.add(CSV_FILE).commit("Auto-update memes.csv with latest meme data").push();
   } else {
-    console.log("CSV updated successfully!");
+    console.log("No new meme data discovered.");
   }
-});
+};
 
-console.log("Rows processed:", processed);
+// Main function to discover and update memes
+const discoverMemes = async () => {
+  // Read the CSV
+  const rows = parseCSV();
+
+  // Process meme data
+  const updatedRows = await processMemeData(rows);
+
+  // Save updated data back to CSV if there are changes
+  saveCSV(updatedRows);
+};
+
+// Run the discovery process
+discoverMemes().catch(console.error);
