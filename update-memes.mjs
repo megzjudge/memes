@@ -1,14 +1,11 @@
 import fs from "node:fs/promises";
 import path from "node:path";
+import fetch from "node-fetch";
 import process from "node:process";
 
-const TOP_N = 14; // still used as "desired top size", but not enforced
-
+const TOP_N = 14;  // Limit of memes to pull
 const CSV_PATH = path.resolve(process.cwd(), "memes.csv");
-const DISCOVERY_PATH = path.resolve(
-  process.cwd(),
-  process.env.DISCOVERY_PATH || "latest_ids.json"
-);
+const IMGFLIP_USER_PAGE = "https://imgflip.com/all/user-images/mbtininja?sort=latest";  // User images URL
 
 const CSV_HEADERS = [
   "ID",
@@ -23,7 +20,6 @@ const CSV_HEADERS = [
   "TAGS",
 ];
 
-// Known GIF IDs (from your earlier confirmation)
 const KNOWN_GIFS = new Set(["ajpoyw", "ah7dcs"]);
 
 function log(...args) {
@@ -39,10 +35,6 @@ function die(msg) {
   process.exit(1);
 }
 
-function unique(arr) {
-  return [...new Set(arr)];
-}
-
 function csvEscape(value) {
   const s = String(value ?? "");
   if (/[",\n\r]/.test(s)) return `"${s.replace(/"/g, '""')}"`;
@@ -53,77 +45,17 @@ function csvLine(fields) {
   return fields.map(csvEscape).join(",");
 }
 
-function parseCSV(text) {
-  const rows = [];
-  let row = [];
-  let field = "";
-  let inQuotes = false;
-
-  for (let i = 0; i < text.length; i++) {
-    const c = text[i];
-
-    if (inQuotes) {
-      if (c === '"') {
-        const next = text[i + 1];
-        if (next === '"') {
-          field += '"';
-          i++;
-        } else {
-          inQuotes = false;
-        }
-      } else {
-        field += c;
-      }
-      continue;
-    }
-
-    if (c === '"') {
-      inQuotes = true;
-      continue;
-    }
-
-    if (c === ",") {
-      row.push(field);
-      field = "";
-      continue;
-    }
-
-    if (c === "\n") {
-      row.push(field);
-      field = "";
-      rows.push(row);
-      row = [];
-      continue;
-    }
-
-    if (c === "\r") continue;
-
-    field += c;
+async function readExistingCsv() {
+  try {
+    const text = await fs.readFile(CSV_PATH, "utf8");
+    const parsed = parseCSV(text);
+    const headers = ensureHeaders(parsed.headers);
+    const rows = parsed.rows.map((r) => toRowObject(parsed.headers.length ? parsed.headers : headers, r));
+    return { headers, rows };
+  } catch (e) {
+    if (e.code === "ENOENT") return { headers: CSV_HEADERS, rows: [] };
+    throw e;
   }
-
-  if (field.length > 0 || row.length > 0) {
-    row.push(field);
-    rows.push(row);
-  }
-
-  if (rows.length === 0) return { headers: [], rows: [] };
-
-  const headers = rows[0].map((h) => String(h ?? "").trim());
-  const data = rows
-    .slice(1)
-    .filter((r) => r.some((x) => String(x ?? "").trim() !== ""));
-
-  return { headers, rows: data };
-}
-
-function toRowObject(headers, row) {
-  const obj = {};
-  for (let i = 0; i < headers.length; i++) obj[headers[i]] = row[i] ?? "";
-  return obj;
-}
-
-function fromRowObject(headers, obj) {
-  return headers.map((h) => obj[h] ?? "");
 }
 
 function ensureHeaders(parsedHeaders) {
@@ -139,24 +71,56 @@ function ensureHeaders(parsedHeaders) {
   return normalized;
 }
 
-async function readExistingCsv() {
-  try {
-    const text = await fs.readFile(CSV_PATH, "utf8");
-    const parsed = parseCSV(text);
-    const headers = ensureHeaders(parsed.headers);
+function parseCSV(text) {
+  const rows = [];
+  let row = [];
+  let field = "";
+  let inQuotes = false;
 
-    const rows = parsed.rows.map((r) => {
-      const obj = toRowObject(parsed.headers.length ? parsed.headers : headers, r);
-      const full = {};
-      for (const h of headers) full[h] = obj[h] ?? "";
-      return full;
-    });
-
-    return { headers, rows };
-  } catch (e) {
-    if (e.code === "ENOENT") return { headers: CSV_HEADERS, rows: [] };
-    throw e;
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
+    if (inQuotes) {
+      if (c === '"') {
+        const next = text[i + 1];
+        if (next === '"') {
+          field += '"';
+          i++;
+        } else {
+          inQuotes = false;
+        }
+      } else {
+        field += c;
+      }
+      continue;
+    }
+    if (c === '"') {
+      inQuotes = true;
+      continue;
+    }
+    if (c === ",") {
+      row.push(field);
+      field = "";
+      continue;
+    }
+    if (c === "\n") {
+      row.push(field);
+      field = "";
+      rows.push(row);
+      row = [];
+      continue;
+    }
+    if (c === "\r") continue;
+    field += c;
   }
+
+  if (field.length > 0 || row.length > 0) {
+    row.push(field);
+    rows.push(row);
+  }
+
+  const headers = rows[0].map((h) => String(h ?? "").trim());
+  const data = rows.slice(1).filter((r) => r.some((x) => String(x ?? "").trim() !== ""));
+  return { headers, rows: data };
 }
 
 async function writeCsv(headers, rowObjects) {
@@ -167,6 +131,16 @@ async function writeCsv(headers, rowObjects) {
   }
   lines.push("");
   await fs.writeFile(CSV_PATH, lines.join("\n"), "utf8");
+}
+
+function fromRowObject(headers, obj) {
+  return headers.map((h) => obj[h] ?? "");
+}
+
+function toRowObject(headers, row) {
+  const obj = {};
+  for (let i = 0; i < headers.length; i++) obj[headers[i]] = row[i] ?? "";
+  return obj;
 }
 
 function makeBlankRowForId(id) {
@@ -185,31 +159,34 @@ function makeBlankRowForId(id) {
   return row;
 }
 
-async function getTopIdsFromDiscovery() {
-  const raw = await fs.readFile(DISCOVERY_PATH, "utf8");
-  const j = JSON.parse(raw);
+async function getMemeIdsFromUserPage() {
+  const response = await fetch(IMGFLIP_USER_PAGE);
+  const html = await response.text();
 
-  const idsRaw =
-    Array.isArray(j?.ids) ? j.ids :
-    Array.isArray(j?.latest_ids) ? j.latest_ids :
-    Array.isArray(j) ? j : [];
+  const memeRegex = /href="\/i\/([a-zA-Z0-9]+)/g;
+  const imageRegex = /src="(https:\/\/i\.imgflip\.com\/[a-zA-Z0-9]+(?:\.gif|\.jpg))"/g;
 
-  const ids = unique(idsRaw.map((x) => String(x).trim()).filter(Boolean));
+  let matches;
+  const memeIds = [];
+  const imageUrls = [];
 
-  // No hard fail if fewer than TOP_N — discovery is now separate
-  if (ids.length === 0) {
-    warn("No IDs found in latest_ids.json. Skipping update.");
-    process.exit(0);
+  while ((matches = memeRegex.exec(html)) !== null) {
+    memeIds.push(matches[1]);
   }
 
-  log(`Loaded ${ids.length} IDs from discovery (showing first ${Math.min(14, ids.length)}): ${ids.slice(0, 14).join(", ")}`);
+  while ((matches = imageRegex.exec(html)) !== null) {
+    imageUrls.push(matches[1]);
+  }
 
-  return ids.slice(0, TOP_N);
+  return memeIds.slice(0, TOP_N).map((id, index) => ({
+    id,
+    url: `https://imgflip.com/i/${id}`,
+    imageUrl: imageUrls[index] || `https://i.imgflip.com/${id}.jpg`
+  }));
 }
 
 async function main() {
-  const topIds = await getTopIdsFromDiscovery();
-
+  const topIds = await getMemeIdsFromUserPage();
   const { headers, rows: existingRows } = await readExistingCsv();
 
   const existingTop = existingRows
@@ -222,23 +199,20 @@ async function main() {
     existingTop.every((id, i) => id === topIds[i]);
 
   if (identical) {
-    log("Current top matches discovery. No changes needed.");
+    log("Current top matches the discovered memes. No changes needed.");
     process.exit(0);
   }
 
   const missing = topIds.filter((id) => !existingTop.includes(id));
 
   if (missing.length === 0) {
-    log("Same IDs but different order. Reordering top to match discovery.");
+    log("Same IDs but different order. Reordering top to match discovered memes.");
 
     const byId = new Map(existingRows.map((r) => [String(r.ID || "").trim(), r]));
-
     const newTopRows = topIds.map((id) => byId.get(id) || makeBlankRowForId(id));
 
     const placed = new Set(topIds);
-    const remainder = existingRows.filter(
-      (r) => !placed.has(String(r.ID || "").trim())
-    );
+    const remainder = existingRows.filter((r) => !placed.has(String(r.ID || "").trim()));
 
     await writeCsv(headers, [...newTopRows, ...remainder]);
     log(`Reordered top ${topIds.length} rows in memes.csv.`);
@@ -267,9 +241,8 @@ async function main() {
     .filter((r) => !finalTopSet.has(String(r.ID || "").trim()));
 
   await writeCsv(headers, [...finalTop, ...remainder]);
-  log(
-    `Updated memes.csv: inserted ${missing.length} new row(s) at the top; preserved remaining rows.`
-  );
+
+  log(`Updated memes.csv: inserted ${missing.length} new row(s) at the top; preserved remaining rows.`);
 }
 
 main().catch((e) => {
