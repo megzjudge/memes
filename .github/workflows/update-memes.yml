@@ -1,3 +1,13 @@
+name: Find newly posted memes
+
+on:
+  schedule:
+    - cron: "00 14 * * *"   # 1:00 AM AEDT (2:00 PM UTC)
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+
 jobs:
   update:
     runs-on: ubuntu-latest
