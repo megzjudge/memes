@@ -1,9 +1,9 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import process from "node:process";
-import fetch from "node-fetch";  // Fetch used for web scraping
+import fetch from "node-fetch";
 
-const TOP_N = 14; // still used as "desired top size", but not enforced
+const TOP_N = 14; // Top number of memes to track
 
 const CSV_PATH = path.resolve(process.cwd(), "memes.csv");
 
@@ -20,7 +20,7 @@ const CSV_HEADERS = [
   "TAGS",
 ];
 
-// Known GIF IDs (from your earlier confirmation)
+// Known GIF IDs (add more if you have specific meme formats)
 const KNOWN_GIFS = new Set(["ajpoyw", "ah7dcs"]);
 
 function log(...args) {
@@ -36,20 +36,7 @@ function die(msg) {
   process.exit(1);
 }
 
-function unique(arr) {
-  return [...new Set(arr)];
-}
-
-function csvEscape(value) {
-  const s = String(value ?? "");
-  if (/[",\n\r]/.test(s)) return `"${s.replace(/"/g, '""')}"`;
-  return s;
-}
-
-function csvLine(fields) {
-  return fields.map(csvEscape).join(",");
-}
-
+// Parse CSV data to rows
 function parseCSV(text) {
   const rows = [];
   let row = [];
@@ -106,66 +93,18 @@ function parseCSV(text) {
   if (rows.length === 0) return { headers: [], rows: [] };
 
   const headers = rows[0].map((h) => String(h ?? "").trim());
-  const data = rows
-    .slice(1)
-    .filter((r) => r.some((x) => String(x ?? "").trim() !== ""));
-
+  const data = rows.slice(1).filter((r) => r.some((x) => String(x ?? "").trim() !== ""));
   return { headers, rows: data };
 }
 
+// Convert rows into objects based on CSV headers
 function toRowObject(headers, row) {
   const obj = {};
   for (let i = 0; i < headers.length; i++) obj[headers[i]] = row[i] ?? "";
   return obj;
 }
 
-function fromRowObject(headers, obj) {
-  return headers.map((h) => obj[h] ?? "");
-}
-
-function ensureHeaders(parsedHeaders) {
-  const normalized = (parsedHeaders || []).map((h) => String(h ?? "").trim());
-  const ok =
-    normalized.length === CSV_HEADERS.length &&
-    normalized.every((h, i) => h === CSV_HEADERS[i]);
-
-  if (!ok) {
-    warn("CSV headers missing/mismatched; rewriting with canonical headers.");
-    return CSV_HEADERS;
-  }
-  return normalized;
-}
-
-async function readExistingCsv() {
-  try {
-    const text = await fs.readFile(CSV_PATH, "utf8");
-    const parsed = parseCSV(text);
-    const headers = ensureHeaders(parsed.headers);
-
-    const rows = parsed.rows.map((r) => {
-      const obj = toRowObject(parsed.headers.length ? parsed.headers : headers, r);
-      const full = {};
-      for (const h of headers) full[h] = obj[h] ?? "";
-      return full;
-    });
-
-    return { headers, rows };
-  } catch (e) {
-    if (e.code === "ENOENT") return { headers: CSV_HEADERS, rows: [] };
-    throw e;
-  }
-}
-
-async function writeCsv(headers, rowObjects) {
-  const lines = [];
-  lines.push(csvLine(headers));
-  for (const obj of rowObjects) {
-    lines.push(csvLine(fromRowObject(headers, obj)));
-  }
-  lines.push("");
-  await fs.writeFile(CSV_PATH, lines.join("\n"), "utf8");
-}
-
+// Make a blank row for a given meme ID
 function makeBlankRowForId(id) {
   const row = {};
   for (const h of CSV_HEADERS) row[h] = "";
@@ -173,7 +112,7 @@ function makeBlankRowForId(id) {
   row.URLS = `https://imgflip.com/i/${id}`;
   row.IMAGE_URL = `https://i.imgflip.com/${id}.${KNOWN_GIFS.has(id) ? "gif" : "jpg"}`;
   row.IS_GIF = KNOWN_GIFS.has(id) ? "TRUE" : "FALSE";
-  row.TITLE = id; // fallback
+  row.TITLE = id; // Fallback title
   row.MEME_TYPE = "";
   row.KYM_SLUG = "";
   row.MBTI_TYPES = "";
@@ -182,42 +121,74 @@ function makeBlankRowForId(id) {
   return row;
 }
 
-// Scrape the meme page from Imgflip
+// Scrape meme IDs from Imgflip's user page
 async function getMemeIdsFromUserPage() {
   const userPageUrl = "https://imgflip.com/all/user-images/mbtininja?sort=latest";
   const res = await fetch(userPageUrl);
   const html = await res.text();
 
-  // Scrape meme IDs from the page
+  // Regex to find meme IDs on the page (this matches 'href="/i/ID"')
   const idMatches = [...html.matchAll(/href="\/i\/([^"]+)"/g)];
   const ids = idMatches.map(match => match[1]);
   return ids;
 }
 
+// Read existing memes.csv to check for existing meme IDs
+async function readExistingCsv() {
+  try {
+    const text = await fs.readFile(CSV_PATH, "utf8");
+    const parsed = parseCSV(text);
+    const headers = parsed.headers;
+    const rows = parsed.rows.map((r) => toRowObject(headers, r));
+    return { headers, rows };
+  } catch (e) {
+    if (e.code === "ENOENT") return { headers: CSV_HEADERS, rows: [] };
+    throw e;
+  }
+}
+
+// Write updated data to memes.csv
+async function writeCsv(headers, rowObjects) {
+  const lines = [];
+  lines.push(rowObjects.map(csvEscape).join(","));
+  for (const obj of rowObjects) {
+    lines.push(Object.values(obj).join(","));
+  }
+  await fs.writeFile(CSV_PATH, lines.join("\n"), "utf8");
+}
+
+// Escape CSV fields
+function csvEscape(value) {
+  const s = String(value ?? "");
+  if (/[",\n\r]/.test(s)) return `"${s.replace(/"/g, '""')}"`;
+  return s;
+}
+
 async function main() {
-  const topIds = await getMemeIdsFromUserPage();
+  const topIds = await getMemeIdsFromUserPage();  // Get meme IDs from the page
+  const { headers, rows: existingRows } = await readExistingCsv();  // Read existing CSV
 
-  const { headers, rows: existingRows } = await readExistingCsv();
-
+  // Extract current top meme IDs from the existing CSV (up to TOP_N)
   const existingTop = existingRows
     .slice(0, TOP_N)
     .map((r) => String(r.ID || "").trim())
     .filter(Boolean);
 
+  // Check if the top IDs are identical
   const identical =
     existingTop.length === topIds.length &&
     existingTop.every((id, i) => id === topIds[i]);
 
   if (identical) {
     log("Current top matches discovery. No changes needed.");
-    process.exit(0);
+    return;
   }
 
+  // Find which memes are missing from the CSV
   const missing = topIds.filter((id) => !existingTop.includes(id));
 
   if (missing.length === 0) {
     log("Same IDs but different order. Reordering top to match discovery.");
-
     const byId = new Map(existingRows.map((r) => [String(r.ID || "").trim(), r]));
 
     const newTopRows = topIds.map((id) => byId.get(id) || makeBlankRowForId(id));
@@ -229,11 +200,12 @@ async function main() {
 
     await writeCsv(headers, [...newTopRows, ...remainder]);
     log(`Reordered top ${topIds.length} rows in memes.csv.`);
-    process.exit(0);
+    return;
   }
 
   log(`Found ${missing.length} missing IDs to insert at top: ${missing.join(", ")}`);
 
+  // Create new rows for missing meme IDs
   const newRows = missing.map((id) => makeBlankRowForId(id));
 
   const keepFromExistingTop = existingRows
