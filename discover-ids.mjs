@@ -68,32 +68,37 @@ async function scrapePage(url) {
 
   console.log("Fetching", url);
 
-  const res = await fetch(url, {
-    headers: { "user-agent": "Mozilla/5.0" }
-  });
+  try {
+    const res = await fetch(url, {
+      headers: { "user-agent": "Mozilla/5.0" }
+    });
 
-  const html = await res.text();
+    const html = await res.text();
 
-  const titleMatch = html.match(/<title>(.*?)<\/title>/i);
-  const title = titleMatch ? decodeHtml(titleMatch[1].replace(" - Imgflip", "").trim()) : "";
+    const titleMatch = html.match(/<title>(.*?)<\/title>/i);
+    const title = titleMatch ? decodeHtml(titleMatch[1].replace(" - Imgflip", "").trim()) : "";
 
-  const imageMatch = html.match(/property="og:image" content="([^"]+)"/i);
-  const imageUrl = imageMatch ? imageMatch[1] : "";
+    const imageMatch = html.match(/property="og:image" content="([^"]+)"/i);
+    const imageUrl = imageMatch ? imageMatch[1] : "";
 
-  // Extract tags using the new method
-  const tagMatches = [...html.matchAll(/href='\/tag\/([^']+)'/g)];
-  const tags = normalizeTags(tagMatches.map(m => m[1]));
+    // Extract tags using the correct format
+    const tagMatches = [...html.matchAll(/href='\/tag\/([^']+)'/g)];
+    const tags = normalizeTags(tagMatches.map(m => m[1]));
 
-  // Log the raw tag data for debugging
-  if (tags.length === 0) {
-    console.error(`No tags found for ${url}. The HTML might have changed.`);
+    // Log the raw tag data for debugging
+    if (tags.length === 0) {
+      console.error(`No tags found for ${url}. The HTML structure may have changed.`);
+    }
+
+    // Extract KnowYourMeme slug from link
+    const kymMatch = html.match(/knowyourmeme.com\/memes\/([^"\/]+)/i);
+    const kymSlug = kymMatch ? kymMatch[1] : "";
+
+    return { title, imageUrl, tags, kymSlug };
+  } catch (error) {
+    console.error("Error fetching data for URL:", url, error);
+    return { title: "", imageUrl: "", tags: [], kymSlug: "" };
   }
-
-  // Extract KnowYourMeme slug from link
-  const kymMatch = html.match(/knowyourmeme.com\/memes\/([^"\/]+)/i);
-  const kymSlug = kymMatch ? kymMatch[1] : "";
-
-  return { title, imageUrl, tags, kymSlug };
 }
 
 // Normalize CSV headers to upper case
