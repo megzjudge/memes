@@ -2,9 +2,8 @@ import fs from "fs";
 import fetch from "node-fetch";
 import Papa from "papaparse";
 
-// Constants and Configurations
 const CSV_FILE = "memes.csv";
-const MAX_ROWS_PER_RUN = 14; // Process only the first 14 rows
+const MAX_ROWS_PER_RUN = 14;  // Process only the first 14 rows
 
 const MBTI_TYPES = [
   "ESTP", "ISTP", "ESFP", "ISFP",
@@ -12,6 +11,7 @@ const MBTI_TYPES = [
   "ENFP", "INFP", "ENFJ", "INFJ",
   "ENTJ", "INTJ", "ENTP", "INTP"
 ];
+
 const MBTI_SET = new Set(MBTI_TYPES);
 
 const MEME_TYPE_BLOCKLIST = new Set([
@@ -21,14 +21,14 @@ const MEME_TYPE_BLOCKLIST = new Set([
   "personality"
 ]);
 
-// HTML decoding function
+// HTML decoding
 function decodeHtml(str = "") {
   return str
-    .replace(/&#039;/g, "'")
-    .replace(/&amp;/g, "&")
-    .replace(/&quot;/g, '"')
-    .replace(/&lt;/g, "<")
-    .replace(/&gt;/g, ">");
+    .replace(/&#039;/g, "'")    // Convert &#039; to '
+    .replace(/&amp;/g, "&")      // Convert &amp; to &
+    .replace(/&quot;/g, '"')     // Convert &quot; to "
+    .replace(/&lt;/g, "<")       // Convert &lt; to <
+    .replace(/&gt;/g, ">");      // Convert &gt; to >
 }
 
 // Normalize and deduplicate tags
@@ -38,9 +38,10 @@ function normalizeTags(tags) {
   )];
 }
 
-// Process tags to extract MBTI types, meme type, and keywords
+// Process tags to detect MBTI, Meme Type, and Keywords
 function processTags(tags) {
   const mbti = tags.filter(t => MBTI_SET.has(t.toUpperCase()));
+
   let memeType = "";
   for (const t of tags) {
     if (!MBTI_SET.has(t.toUpperCase()) && !MEME_TYPE_BLOCKLIST.has(t)) {
@@ -48,27 +49,14 @@ function processTags(tags) {
       break;
     }
   }
+
   const keywords = tags.filter(t => {
     if (MBTI_SET.has(t.toUpperCase())) return false;
     if (t === memeType) return false;
     return true;
   });
-  return { mbti, memeType, keywords };
-}
 
-// Retry logic for scraping
-async function scrapePageWithRetry(url, retries = 3) {
-  try {
-    return await scrapePage(url);
-  } catch (error) {
-    if (retries > 0) {
-      console.log(`Retrying... attempts left: ${retries}`);
-      return scrapePageWithRetry(url, retries - 1);
-    } else {
-      console.error(`Failed to fetch after multiple retries: ${url}`);
-      return { title: "", imageUrl: "", tags: [], kymSlug: "" };
-    }
-  }
+  return { mbti, memeType, keywords };
 }
 
 // Scrape the meme page from Imgflip
@@ -93,13 +81,16 @@ async function scrapePage(url) {
     const imageMatch = html.match(/property="og:image" content="([^"]+)"/i);
     const imageUrl = imageMatch ? imageMatch[1] : "";
 
+    // Extract tags using the correct format
     const tagMatches = [...html.matchAll(/href='\/tag\/([^']+)'/g)];
     const tags = normalizeTags(tagMatches.map(m => m[1]));
 
+    // Log the raw tag data for debugging
     if (tags.length === 0) {
       console.error(`No tags found for ${url}. The HTML structure may have changed.`);
     }
 
+    // Extract KnowYourMeme slug from link
     const kymMatch = html.match(/knowyourmeme.com\/memes\/([^"\/]+)/i);
     const kymSlug = kymMatch ? kymMatch[1] : "";
 
@@ -128,62 +119,55 @@ const csvText = fs.readFileSync(CSV_FILE, "utf8");
 const parsed = Papa.parse(csvText, { header: true });
 let rows = parsed.data;
 
-rows = normalizeHeaders(rows);
+rows = normalizeHeaders(rows);  // Ensure all headers are uppercased
 
 let processed = 0;
 
-// Use Promise.all for concurrent processing
-const updateRows = async () => {
-  const promises = rows.slice(0, MAX_ROWS_PER_RUN).map(async (row) => {
-    if (processed >= MAX_ROWS_PER_RUN) return;
+for (const row of rows.slice(0, MAX_ROWS_PER_RUN)) {  // Process only the first 14 rows
+  if (processed >= MAX_ROWS_PER_RUN) break;
 
-    const needsUpdate =
-      !row.IMAGE_URL ||
-      !row.TITLE ||
-      row.TITLE === row.ID ||
-      !row.MEME_TYPE ||
-      !row.KEYWORDS ||
-      !row.TAGS ||
-      !row.URLS;
+  const needsUpdate =
+    !row.IMAGE_URL ||    // Updated column names to match your CSV (all caps)
+    !row.TITLE ||
+    row.TITLE === row.ID ||
+    !row.MEME_TYPE ||
+    !row.KEYWORDS ||
+    !row.TAGS ||
+    !row.URLS;  // Check if the URL is missing
 
-    if (!needsUpdate) return;
+  if (!needsUpdate) continue;
 
-    const { title, imageUrl, tags, kymSlug } = await scrapePageWithRetry(row.URLS);
+  // Scrape meme page for data
+  const { title, imageUrl, tags, kymSlug } = await scrapePage(row.URLS);
 
-    if (title) row.TITLE = title;
-    if (imageUrl) row.IMAGE_URL = imageUrl;
+  // Log tags to verify their accuracy
+  console.log("Scraped Tags for", row.TITLE, ": ", tags);
 
-    row.TAGS = JSON.stringify(tags);
-    row.MBTI_TYPES = JSON.stringify(processTags(tags).mbti);
-    row.MEME_TYPE = processTags(tags).memeType;
-    row.KEYWORDS = JSON.stringify(processTags(tags).keywords);
+  // Process tags to extract MBTI types, meme type, and keywords
+  const { mbti, memeType, keywords } = processTags(tags);
 
-    if (kymSlug && !row.KYM_SLUG) {
-      row.KYM_SLUG = kymSlug;
-    }
+  // Log the processed data for tags, MBTI, and meme type
+  console.log("Processed Data -> MBTI:", mbti, "MemeType:", memeType, "Keywords:", keywords);
 
-    processed++;
-  });
+  // Only update if the data was found
+  if (title) row.TITLE = title;
+  if (imageUrl) row.IMAGE_URL = imageUrl;
 
-  await Promise.all(promises);
-};
+  row.TAGS = JSON.stringify(tags);
+  row.MBTI_TYPES = JSON.stringify(mbti);
+  row.MEME_TYPE = memeType;
+  row.KEYWORDS = JSON.stringify(keywords);
+
+  if (kymSlug && !row.KYM_SLUG) {
+    row.KYM_SLUG = kymSlug;
+  }
+
+  processed++;
+}
 
 // Write updated rows back to CSV
-const saveCSV = () => {
-  const newCsv = Papa.unparse(rows);
-  fs.writeFileSync(CSV_FILE, newCsv, 'utf8', (err) => {
-    if (err) {
-      console.error("Error writing to CSV file:", err);
-    } else {
-      console.log("CSV updated successfully!");
-    }
-  });
-};
+const newCsv = Papa.unparse(rows);
+fs.writeFileSync(CSV_FILE, newCsv);
 
-const runProcess = async () => {
-  await updateRows();
-  console.log("Processed rows:", processed);
-  saveCSV();
-};
-
-runProcess().catch(console.error);
+console.log("Rows processed:", processed);
+console.log("CSV updated successfully!", rows.length, "rows");
