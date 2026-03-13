@@ -21,21 +21,22 @@ const MEME_TYPE_BLOCKLIST = new Set([
   "personality"
 ]);
 
-// HTML decoding
+// HTML decoding (modified to handle '+' as space)
 function decodeHtml(str = "") {
   return str
     .replace(/&#039;/g, "'")    // Convert &#039; to '
     .replace(/&amp;/g, "&")      // Convert &amp; to &
     .replace(/&quot;/g, '"')     // Convert &quot; to "
     .replace(/&lt;/g, "<")       // Convert &lt; to <
-    .replace(/&gt;/g, ">");      // Convert &gt; to >
+    .replace(/&gt;/g, ">")       // Convert &gt; to >
+    .replace(/\+/g, ' ');        // Replace '+' with space
 }
 
-// Normalize and deduplicate tags
+// Normalize and deduplicate tags (now returning a comma-separated string)
 function normalizeTags(tags) {
   return [...new Set(
     tags.map(t => t.toLowerCase().trim()).filter(Boolean)
-  )];
+  )].join(', ');  // Join tags into a comma-separated string
 }
 
 // Process tags to detect MBTI, Meme Type, and Keywords
@@ -83,7 +84,7 @@ async function scrapePage(url) {
 
     // Extract tags using the correct format
     const tagMatches = [...html.matchAll(/href='\/tag\/([^']+)'/g)];
-    const tags = normalizeTags(tagMatches.map(m => m[1]));
+    const tags = normalizeTags(tagMatches.map(m => m[1])); // Normalize tags into a string
 
     // Log the raw tag data for debugging
     if (tags.length === 0) {
@@ -144,7 +145,7 @@ for (const row of rows.slice(0, MAX_ROWS_PER_RUN)) {
   console.log("Scraped Tags for", row.TITLE, ": ", tags);
 
   // Process tags to extract MBTI types, meme type, and keywords
-  const { mbti, memeType, keywords } = processTags(tags);
+  const { mbti, memeType, keywords } = processTags(tags.split(', '));  // Split back into array before processing
 
   // Log the processed data for tags, MBTI, and meme type
   console.log("Processed Data -> MBTI:", mbti, "MemeType:", memeType, "Keywords:", keywords);
@@ -153,10 +154,10 @@ for (const row of rows.slice(0, MAX_ROWS_PER_RUN)) {
   if (title) row.TITLE = title;
   if (imageUrl) row.IMAGE_URL = imageUrl;
 
-  row.TAGS = JSON.stringify(tags);
-  row.MBTI_TYPES = JSON.stringify(mbti);
+  row.TAGS = tags; // Store the tags as a comma-separated string
+  row.MBTI_TYPES = mbti.join(', '); // Join MBTI types into a comma-separated string
   row.MEME_TYPE = memeType;
-  row.KEYWORDS = JSON.stringify(keywords);
+  row.KEYWORDS = keywords.join(', ');  // Join keywords into a comma-separated string
 
   if (kymSlug && !row.KYM_SLUG) {
     row.KYM_SLUG = kymSlug;
