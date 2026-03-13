@@ -158,9 +158,11 @@ for (const row of rows.slice(0, MAX_ROWS_PER_RUN)) {
   if (title) row.TITLE = title;
   if (imageUrl) row.IMAGE_URL = imageUrl;
 
-  row.TAGS = tags; // Store the tags as a comma-separated string
+  // Remove dashes from MEME_TYPE and TAGS before saving them
+  row.MEME_TYPE = memeType.replace(/-/g, " ");
+  row.TAGS = tags.replace(/-/g, " ");
+
   row.MBTI_TYPES = mbti.join(', '); // Join MBTI types into a comma-separated string
-  row.MEME_TYPE = memeType;
   row.KEYWORDS = keywords.join(', ');  // Join keywords into a comma-separated string
 
   if (kymSlug && !row.KYM_SLUG) {
