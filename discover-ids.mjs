@@ -3,7 +3,7 @@ import fetch from "node-fetch";
 import Papa from "papaparse";
 
 const CSV_FILE = "memes.csv";
-const MAX_ROWS_PER_RUN = 14;  // Process only the first 14 rows
+const MAX_ROWS_PER_RUN = 14; // Process only the first 14 rows
 
 const MBTI_TYPES = [
   "ESTP", "ISTP", "ESFP", "ISFP",
@@ -165,9 +165,17 @@ for (const row of rows.slice(0, MAX_ROWS_PER_RUN)) {  // Process only the first 
   processed++;
 }
 
+// Log the state of rows before writing to ensure all data is processed
+console.log("Processed rows:", rows.slice(0, MAX_ROWS_PER_RUN));
+
 // Write updated rows back to CSV
 const newCsv = Papa.unparse(rows);
-fs.writeFileSync(CSV_FILE, newCsv);
+fs.writeFileSync(CSV_FILE, newCsv, 'utf8', (err) => {
+  if (err) {
+    console.error("Error writing to CSV file:", err);
+  } else {
+    console.log("CSV updated successfully!");
+  }
+});
 
 console.log("Rows processed:", processed);
-console.log("CSV updated successfully!", rows.length, "rows");
