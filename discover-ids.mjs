@@ -42,6 +42,10 @@ function normalizeTags(tags) {
 function processTags(tags) {
   const mbti = tags.filter(t => MBTI_SET.has(t.toUpperCase()));
 
+  if (mbti.length === 0) {
+    console.warn("No MBTI types found in tags:", tags);
+  }
+
   let memeType = "";
   for (const t of tags) {
     if (!MBTI_SET.has(t.toUpperCase()) && !MEME_TYPE_BLOCKLIST.has(t)) {
@@ -50,11 +54,19 @@ function processTags(tags) {
     }
   }
 
+  if (!memeType) {
+    console.warn("No valid meme type found in tags:", tags);
+  }
+
   const keywords = tags.filter(t => {
     if (MBTI_SET.has(t.toUpperCase())) return false;
     if (t === memeType) return false;
     return true;
   });
+
+  if (keywords.length === 0) {
+    console.warn("No valid keywords found in tags:", tags);
+  }
 
   return { mbti, memeType, keywords };
 }
@@ -66,45 +78,79 @@ async function scrapePage(url) {
     return { title: "", imageUrl: "", tags: [], kymSlug: "" };
   }
 
-  console.log("Fetching", url);
+  console.log(`Fetching data for URL: ${url}`);
 
-  const res = await fetch(url, {
-    headers: { "user-agent": "Mozilla/5.0" }
-  });
+  try {
+    const res = await fetch(url, {
+      headers: { "user-agent": "Mozilla/5.0" }
+    });
 
-  const html = await res.text();
+    if (!res.ok) {
+      console.error(`Error: Failed to fetch URL ${url}. Status: ${res.status}`);
+      return { title: "", imageUrl: "", tags: [], kymSlug: "" };
+    }
 
-  const titleMatch = html.match(/<title>(.*?)<\/title>/i);
-  const title = titleMatch ? decodeHtml(titleMatch[1].replace(" - Imgflip", "").trim()) : "";
+    const html = await res.text();
 
-  const imageMatch = html.match(/property="og:image" content="([^"]+)"/i);
-  const imageUrl = imageMatch ? imageMatch[1] : "";
+    const titleMatch = html.match(/<title>(.*?)<\/title>/i);
+    const title = titleMatch ? decodeHtml(titleMatch[1].replace(" - Imgflip", "").trim()) : "";
 
-  const tagMatches = [...html.matchAll(/class="tag".*?>(.*?)</g)];
-  const tags = normalizeTags(tagMatches.map(m => m[1]));
+    if (!title) {
+      console.error("Error: Failed to extract title from page.");
+    }
 
-  // Extract KnowYourMeme slug from link
-  const kymMatch = html.match(/knowyourmeme.com\/memes\/([^"\/]+)/i);
-  const kymSlug = kymMatch ? kymMatch[1] : "";
+    const imageMatch = html.match(/property="og:image" content="([^"]+)"/i);
+    const imageUrl = imageMatch ? imageMatch[1] : "";
 
-  return { title, imageUrl, tags, kymSlug };
+    if (!imageUrl) {
+      console.error("Error: Failed to extract image URL from page.");
+    }
+
+    const tagMatches = [...html.matchAll(/class="tag".*?>(.*?)</g)];
+    const tags = normalizeTags(tagMatches.map(m => m[1]));
+
+    if (tags.length === 0) {
+      console.error("Error: No tags found on the page.");
+    }
+
+    // Extract KnowYourMeme slug from link
+    const kymMatch = html.match(/knowyourmeme.com\/memes\/([^"\/]+)/i);
+    const kymSlug = kymMatch ? kymMatch[1] : "";
+
+    return { title, imageUrl, tags, kymSlug };
+
+  } catch (err) {
+    console.error(`Error: Failed to fetch URL ${url}.`, err);
+    return { title: "", imageUrl: "", tags: [], kymSlug: "" };
+  }
 }
 
 // Scrape the meme template metadata (meme classification improvement)
 async function scrapeTemplateMetadata(templateUrl) {
   console.log("Fetching template metadata", templateUrl);
 
-  const res = await fetch(templateUrl, {
-    headers: { "user-agent": "Mozilla/5.0" }
-  });
+  try {
+    const res = await fetch(templateUrl, {
+      headers: { "user-agent": "Mozilla/5.0" }
+    });
 
-  const html = await res.text();
+    if (!res.ok) {
+      console.error(`Error: Failed to fetch template URL ${templateUrl}. Status: ${res.status}`);
+      return "";
+    }
 
-  // Template-specific meme metadata (meme category, name)
-  const memeTypeMatch = html.match(/"meme_name":"(.*?)"/i);
-  const memeType = memeTypeMatch ? decodeHtml(memeTypeMatch[1]) : "";
+    const html = await res.text();
 
-  return memeType;
+    // Template-specific meme metadata (meme category, name)
+    const memeTypeMatch = html.match(/"meme_name":"(.*?)"/i);
+    const memeType = memeTypeMatch ? decodeHtml(memeTypeMatch[1]) : "";
+
+    return memeType;
+
+  } catch (err) {
+    console.error(`Error: Failed to fetch template URL ${templateUrl}.`, err);
+    return "";
+  }
 }
 
 // Normalize CSV headers to upper case
@@ -132,6 +178,8 @@ let processed = 0;
 // Only process the last 14 rows
 const last14Rows = rows.slice(-14);
 
+console.log(`Processing ${last14Rows.length} rows`);
+
 for (const row of last14Rows) {
   if (processed >= MAX_ROWS_PER_RUN) break;
 
@@ -146,8 +194,24 @@ for (const row of last14Rows) {
 
   if (!needsUpdate) continue;
 
+  // **Debugging Log for GitHub Actions**
+  console.log(`Processing row with ID: ${row.ID}`);
+  console.log(`URLS column value: ${row.URLS}`);
+
+  // Check if the URL is empty
+  if (!row.URLS || row.URLS.trim() === "") {
+    console.error(`Error: URLS is empty for row with ID: ${row.ID}`);
+    continue;  // Skip this row if URL is empty
+  }
+
   // Scrape meme page for data using the correct column name `URLS`
   const { title, imageUrl, tags, kymSlug } = await scrapePage(row.URLS);  // Using row.URLS
+
+  // Check if the data was fetched
+  if (!title || !imageUrl || tags.length === 0) {
+    console.error(`Error: Failed to scrape data for row with ID: ${row.ID}`);
+    continue;  // Skip the row if any important data is missing
+  }
 
   // Log tags to verify their accuracy
   console.log("Scraped Tags for", row.TITLE, ": ", tags);
@@ -157,6 +221,21 @@ for (const row of last14Rows) {
 
   // Log the processed data for tags, MBTI, and meme type
   console.log("Processed Data -> MBTI:", mbti, "MemeType:", memeType, "Keywords:", keywords);
+
+  // Check for failure to extract MBTI types
+  if (mbti.length === 0) {
+    console.warn(`Warning: No MBTI types extracted for row with ID: ${row.ID}`);
+  }
+
+  // Check for failure to extract meme type
+  if (!memeType) {
+    console.warn(`Warning: No meme type extracted for row with ID: ${row.ID}`);
+  }
+
+  // Check for failure to extract keywords
+  if (keywords.length === 0) {
+    console.warn(`Warning: No keywords extracted for row with ID: ${row.ID}`);
+  }
 
   // Try to scrape the template page for better meme type detection
   const templateUrl = row.MEME_TYPE ? `https://imgflip.com/memegenerator/${row.MEME_TYPE}` : '';
