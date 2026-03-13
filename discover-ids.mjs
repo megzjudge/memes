@@ -21,7 +21,7 @@ const MEME_TYPE_BLOCKLIST = new Set([
   "personality"
 ]);
 
-// HTML decoding (modified to handle '+' as space)
+// HTML decoding (added replacement for '+' sign)
 function decodeHtml(str = "") {
   return str
     .replace(/&#039;/g, "'")    // Convert &#039; to '
@@ -32,10 +32,10 @@ function decodeHtml(str = "") {
     .replace(/\+/g, ' ');        // Replace '+' with space
 }
 
-// Normalize and deduplicate tags (now returning a comma-separated string)
+// Normalize and deduplicate tags (added replacement for '+' sign in tags)
 function normalizeTags(tags) {
   return [...new Set(
-    tags.map(t => t.toLowerCase().trim()).filter(Boolean)
+    tags.map(t => t.toLowerCase().trim().replace(/\+/g, ' ')).filter(Boolean)
   )].join(', ');  // Join tags into a comma-separated string
 }
 
@@ -104,7 +104,6 @@ async function scrapePage(url) {
 
 // Normalize CSV headers to upper case
 function normalizeHeaders(rows) {
-  const firstRow = rows[0];
   return rows.map(row => {
     const normalizedRow = {};
     for (const [key, value] of Object.entries(row)) {
