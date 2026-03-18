@@ -276,7 +276,6 @@ async function main() {
   const finalTopSet = new Set(finalTop.map((r) => String(r.ID || "").trim()));
   const remainder = existingRows
     .slice(TOP_N)
-    .filter((r) => !
     .filter((r) => !finalTopSet.has(String(r.ID || "").trim()));
 
   await writeCsv(headers, [...finalTop, ...remainder]);
