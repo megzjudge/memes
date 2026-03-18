@@ -18,23 +18,7 @@ jobs:
           node-version: "20"
 
       - name: Fetch meme IDs directly from Imgflip
-        run: |
-          node -e "
-            const fetch = require('node-fetch');
-            const url = 'https://imgflip.com/all/user-images/mbtininja?sort=latest';
-            fetch(url)
-              .then(res => res.text())
-              .then(html => {
-                const idMatches = [...html.matchAll(/href=\"\/i\/([^"]+)\"/g)];
-                const ids = idMatches.map(match => match[1]);
-                console.log('Found meme IDs:', ids);
-                require('fs').writeFileSync('./latest_ids.json', JSON.stringify({ ids }));
-              })
-              .catch(err => {
-                console.error('Error fetching meme IDs:', err);
-                process.exit(1);
-              });
-          "
+        run: node -e "const fetch = require('node-fetch'); const fs = require('fs'); fetch('https://imgflip.com/all/user-images/mbtininja?sort=latest').then(res => res.text()).then(html => { const ids = [...html.matchAll(/href=\\\"\\/i\\/([^\\\"]+)\\\"/g)].map(m => m[1]); console.log('Found meme IDs:', ids); fs.writeFileSync('./latest_ids.json', JSON.stringify({ ids })); }).catch(err => { console.error(err); process.exit(1); });"
         
       - name: Update memes.csv from discovery
         run: node update-memes.mjs
