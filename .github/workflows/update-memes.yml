@@ -17,6 +17,9 @@ jobs:
         with:
           node-version: "20"
 
+      - name: Install node-fetch v2
+        run: npm install node-fetch@2
+
       - name: Fetch meme IDs directly from Imgflip
         run: node -e "const fetch = require('node-fetch'); const fs = require('fs'); fetch('https://imgflip.com/all/user-images/mbtininja?sort=latest').then(res => res.text()).then(html => { const ids = [...html.matchAll(/href=\\\"\\/i\\/([^\\\"]+)\\\"/g)].map(m => m[1]); console.log('Found meme IDs:', ids); fs.writeFileSync('./latest_ids.json', JSON.stringify({ ids })); }).catch(err => { console.error(err); process.exit(1); });"
         
