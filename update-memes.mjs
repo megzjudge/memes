@@ -170,7 +170,7 @@ function makeBlankRowForId(id) {
 }
 
 async function fetchLatestMemeIds() {
-  const url = "https://imgflip.com/all/user-images/mbtininja?sort=latest";
+  const url = "https://imgflip.com/all/user-images/mbtininja?sort=latest&nsfw=1";
   try {
     const res = await fetch(url);
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
