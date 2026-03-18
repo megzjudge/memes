@@ -5,7 +5,6 @@ import process from "node:process";
 const TOP_N = 14; // Desired top size, not strictly enforced
 
 const CSV_PATH = path.resolve(process.cwd(), "memes.csv");
-const DISCOVERY_PATH = path.resolve(process.cwd(), "latest_ids.json");
 
 const CSV_HEADERS = [
   "ID",
@@ -181,49 +180,34 @@ function makeBlankRowForId(id) {
   return row;
 }
 
-// Scrape meme page from Imgflip to get meme IDs (fallback)
-async function getMemeIdsFromUserPage() {
-  const userPageUrl = "https://imgflip.com/all/user-images/mbtininja?sort=latest";
-  const res = await fetch(userPageUrl);
-  if (!res.ok) {
-    throw new Error(`Failed to fetch user page: ${res.status}`);
-  }
-  const html = await res.text();
-
-  // Robust regex: handles optional quotes, whitespace, captures 5-10 char alphanum IDs
-  const idMatches = [...html.matchAll(/href\s*=\s*["']?\/?i\/([a-z0-9]{5,10})["']?/gi)];
-  const ids = idMatches.map(match => match[1].trim()).filter(Boolean);
-  return unique(ids); // ensure no dupes
-}
-
-async function getTopIdsFromDiscovery() {
-  let ids = [];
+async function fetchLatestMemeIds() {
+  const url = "https://imgflip.com/all/user-images/mbtininja?sort=latest";
   try {
-    const raw = await fs.readFile(DISCOVERY_PATH, "utf8");
-    const j = JSON.parse(raw);
+    const res = await fetch(url);
+    if (!res.ok) {
+      throw new Error(`Fetch failed: HTTP ${res.status}`);
+    }
+    const html = await res.text();
 
-    const idsRaw =
-      Array.isArray(j?.ids) ? j.ids :
-      Array.isArray(j?.latest_ids) ? j.latest_ids :
-      Array.isArray(j) ? j : [];
+    // Regex tuned for current page: href="/i/xxxxxx" or similar
+    const matches = html.matchAll(/href\s*=\s*["']?\/i\/([a-z0-9]{6,8})["']?/gi);
+    const ids = [...new Set(Array.from(matches, m => m[1]))];
 
-    ids = unique(idsRaw.map((x) => String(x).trim()).filter(Boolean));
-  } catch (e) {
-    console.warn('No latest_ids.json found or invalid; fetching directly from Imgflip...');
-    ids = await getMemeIdsFromUserPage();
+    if (ids.length === 0) {
+      warn("No meme IDs found in HTML.");
+      process.exit(0);
+    }
+
+    log(`Fetched ${ids.length} unique latest IDs: ${ids.slice(0, TOP_N).join(", ")}...`);
+    return ids.slice(0, TOP_N);
+  } catch (err) {
+    console.error("Failed to fetch/scrape Imgflip:", err.message || err);
+    process.exit(1);
   }
-
-  if (ids.length === 0) {
-    warn("No meme IDs found at all. Skipping update.");
-    process.exit(0);
-  }
-
-  log(`Loaded ${ids.length} IDs: ${ids.slice(0, 14).join(", ")}`);
-  return ids.slice(0, TOP_N);
 }
 
 async function main() {
-  const topIds = await getTopIdsFromDiscovery();
+  const topIds = await fetchLatestMemeIds();
 
   const { headers, rows: existingRows } = await readExistingCsv();
 
@@ -237,14 +221,14 @@ async function main() {
     existingTop.every((id, i) => id === topIds[i]);
 
   if (identical) {
-    log("Current top matches discovery. No changes needed.");
+    log("Current top matches latest discovery. No changes needed.");
     process.exit(0);
   }
 
   const missing = topIds.filter((id) => !existingTop.includes(id));
 
   if (missing.length === 0) {
-    log("Same IDs but different order. Reordering top to match discovery.");
+    log("Same IDs but different order → reordering top to match latest.");
 
     const byId = new Map(existingRows.map((r) => [String(r.ID || "").trim(), r]));
 
