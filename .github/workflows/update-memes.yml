@@ -13,45 +13,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
       - uses: actions/setup-node@v4
         with:
           node-version: "20"
 
-      - name: Install node-fetch v2
-        run: npm install node-fetch@2
-
-      - name: Fetch meme IDs directly from Imgflip
-        run: |
-          node --no-warnings -e "
-            const fs = require('fs');
-            const fetch = require('node-fetch');
-            fetch('https://imgflip.com/all/user-images/mbtininja?sort=latest')
-              .then(res => {
-                if (!res.ok) throw new Error('HTTP ' + res.status);
-                return res.text();
-              })
-              .then(html => {
-                fs.writeFileSync('debug.html', html);
-                // More forgiving regex: match href=.../i/ID... with flexible quoting
-                const regex = /href\\s*=\\s*([\"']?)\\s*\\/i\\/([a-z0-9]{5,10})\\1/gi;
-                const matches = html.matchAll(regex);
-                const ids = Array.from(matches, m => m[2])
-                                 .filter(id => id && id.length >= 5);
-                console.log('Extracted IDs:', ids);
-                console.log('Count:', ids.length);
-                if (ids.length === 0) {
-                  console.log('First 1000 chars of HTML:\\n' + html.slice(0, 1000).replace(/\\n/g, '\\\\n'));
-                  console.log('Looking for sample href:', html.includes('/i/') ? 'yes' : 'no');
-                }
-                fs.writeFileSync('./latest_ids.json', JSON.stringify({ ids }, null, 2));
-              })
-              .catch(err => {
-                console.error('Fetch/scrape failed:', err.message || err);
-                process.exit(1);
-              });
-          "
-          
-      - name: Update memes.csv from discovery
+      - name: Update memes.csv from latest Imgflip discovery
         run: node update-memes.mjs
 
       - name: Commit changes if any
