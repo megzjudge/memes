@@ -21,8 +21,32 @@ jobs:
         run: npm install node-fetch@2
 
       - name: Fetch meme IDs directly from Imgflip
-        run: node -e "const fetch = require('node-fetch'); const fs = require('fs'); fetch('https://imgflip.com/all/user-images/mbtininja?sort=latest').then(res => res.text()).then(html => { const ids = [...html.matchAll(/href=\\\"\\/i\\/([^\\\"]+)\\\"/g)].map(m => m[1]); console.log('Found meme IDs:', ids); fs.writeFileSync('./latest_ids.json', JSON.stringify({ ids })); }).catch(err => { console.error(err); process.exit(1); });"
-        
+        run: |
+          node --no-warnings -e '
+            const fs = require("fs");
+            const fetch = require("node-fetch");
+            fetch("https://imgflip.com/all/user-images/mbtininja?sort=latest")
+              .then(res => {
+                if (!res.ok) throw new Error(`HTTP error! status: ${res.status}`);
+                return res.text();
+              })
+              .then(html => {
+                fs.writeFileSync("debug.html", html); // ← save raw HTML to inspect later
+                const matches = html.matchAll(/href=["\']\/i\/([^"\']+)["\']/g);
+                const ids = Array.from(matches, m => m[1]).filter(id => id && /^[a-z0-9]{5,10}$/i.test(id));
+                console.log("Raw matches count:", matches.length ? "some found" : "none");
+                console.log("Extracted IDs:", ids);
+                if (ids.length === 0) {
+                  console.log("First 500 chars of HTML for debug:", html.slice(0, 500));
+                }
+                fs.writeFileSync("./latest_ids.json", JSON.stringify({ ids }, null, 2));
+              })
+              .catch(err => {
+                console.error("Fetch/scrape failed:", err.message || err);
+                process.exit(1);
+              });
+          '
+          
       - name: Update memes.csv from discovery
         run: node update-memes.mjs
 
