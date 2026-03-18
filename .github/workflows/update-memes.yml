@@ -22,31 +22,34 @@ jobs:
 
       - name: Fetch meme IDs directly from Imgflip
         run: |
-          node --no-warnings -e '
-            const fs = require("fs");
-            const fetch = require("node-fetch");
-            fetch("https://imgflip.com/all/user-images/mbtininja?sort=latest")
+          node --no-warnings -e "
+            const fs = require('fs');
+            const fetch = require('node-fetch');
+            fetch('https://imgflip.com/all/user-images/mbtininja?sort=latest')
               .then(res => {
-                if (!res.ok) throw new Error(`HTTP error! status: ${res.status}`);
+                if (!res.ok) throw new Error('HTTP ' + res.status);
                 return res.text();
               })
               .then(html => {
-                fs.writeFileSync("debug.html", html);
-                const matches = html.matchAll(/href=["\']\/i\/([^"\']+)["\']/g);
-                const ids = Array.from(matches, m => m[1])
-                                 .filter(id => id && /^[a-z0-9]{5,10}$/i.test(id));
-                console.log("Raw matches count:", ids.length > 0 ? "some found" : "none");
-                console.log("Extracted IDs:", ids);
+                fs.writeFileSync('debug.html', html);
+                // More forgiving regex: match href=.../i/ID... with flexible quoting
+                const regex = /href\\s*=\\s*([\"']?)\\s*\\/i\\/([a-z0-9]{5,10})\\1/gi;
+                const matches = html.matchAll(regex);
+                const ids = Array.from(matches, m => m[2])
+                                 .filter(id => id && id.length >= 5);
+                console.log('Extracted IDs:', ids);
+                console.log('Count:', ids.length);
                 if (ids.length === 0) {
-                  console.log("First 500 chars of HTML:", html.slice(0, 500));
+                  console.log('First 1000 chars of HTML:\\n' + html.slice(0, 1000).replace(/\\n/g, '\\\\n'));
+                  console.log('Looking for sample href:', html.includes('/i/') ? 'yes' : 'no');
                 }
-                fs.writeFileSync("./latest_ids.json", JSON.stringify({ ids }, null, 2));
+                fs.writeFileSync('./latest_ids.json', JSON.stringify({ ids }, null, 2));
               })
               .catch(err => {
-                console.error("Fetch/scrape failed:", err.message || err);
+                console.error('Fetch/scrape failed:', err.message || err);
                 process.exit(1);
               });
-          '
+          "
           
       - name: Update memes.csv from discovery
         run: node update-memes.mjs
