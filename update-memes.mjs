@@ -181,16 +181,19 @@ function makeBlankRowForId(id) {
   return row;
 }
 
-// Scrape meme page from Imgflip to get meme IDs
+// Scrape meme page from Imgflip to get meme IDs (fallback)
 async function getMemeIdsFromUserPage() {
   const userPageUrl = "https://imgflip.com/all/user-images/mbtininja?sort=latest";
   const res = await fetch(userPageUrl);
+  if (!res.ok) {
+    throw new Error(`Failed to fetch user page: ${res.status}`);
+  }
   const html = await res.text();
 
-  // Scrape meme IDs from the page
-  const idMatches = [...html.matchAll(/href="\/i\/([^"]+)"/g)];
-  const ids = idMatches.map(match => match[1]);
-  return ids;
+  // Robust regex: handles optional quotes, whitespace, captures 5-10 char alphanum IDs
+  const idMatches = [...html.matchAll(/href\s*=\s*["']?\/?i\/([a-z0-9]{5,10})["']?/gi)];
+  const ids = idMatches.map(match => match[1].trim()).filter(Boolean);
+  return unique(ids); // ensure no dupes
 }
 
 async function getTopIdsFromDiscovery() {
@@ -206,12 +209,12 @@ async function getTopIdsFromDiscovery() {
 
     ids = unique(idsRaw.map((x) => String(x).trim()).filter(Boolean));
   } catch (e) {
-    console.warn('No latest_ids.json found, fetching directly from Imgflip...');
-    ids = await getMemeIdsFromUserPage(); // Fallback to scraping directly if the file is missing
+    console.warn('No latest_ids.json found or invalid; fetching directly from Imgflip...');
+    ids = await getMemeIdsFromUserPage();
   }
 
   if (ids.length === 0) {
-    warn("No meme IDs found. Skipping update.");
+    warn("No meme IDs found at all. Skipping update.");
     process.exit(0);
   }
 
@@ -274,6 +277,7 @@ async function main() {
   );
 
   const finalTopSet = new Set(finalTop.map((r) => String(r.ID || "").trim()));
+
   const remainder = existingRows
     .slice(TOP_N)
     .filter((r) => !finalTopSet.has(String(r.ID || "").trim()));
