@@ -1,7 +1,6 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import process from "node:process";
-import fetch from "node-fetch";
 
 const TOP_N = 14; // Desired top size, not strictly enforced
 
