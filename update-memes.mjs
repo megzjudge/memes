@@ -170,10 +170,20 @@ function makeBlankRowForId(id) {
 }
 
 async function fetchLatestMemeIds() {
-  const url = "https://imgflip.com/all/user-images/mbtininja?sort=latest&nsfw=1";
+  const url = "https://imgflip.com/all/user-images/mbtininja?sort=latest";
+
   try {
-    const res = await fetch(url);
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const res = await fetch(url, {
+      headers: {
+        'User-Agent':
+          'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36'
+      }
+    });
+
+    if (!res.ok) {
+      throw new Error(`HTTP ${res.status}`);
+    }
+
     const html = await res.text();
 
     const matches = html.matchAll(/href\s*=\s*["']?\/i\/([a-z0-9]{6,8})["']?/gi);
@@ -184,7 +194,13 @@ async function fetchLatestMemeIds() {
       process.exit(0);
     }
 
-    log(`Fetched ${ids.length} unique latest IDs (showing first ${TOP_N}): ${ids.slice(0, TOP_N).join(", ")}`);
+    log(
+      `Fetched ${ids.length} unique latest IDs (showing first ${TOP_N}): ${ids.slice(0, TOP_N).join(", ")}`
+    );
+    log(
+      "Note: Only safe/public memes are visible in anonymous fetches. NSFW-flagged content is hidden unless logged in with NSFW enabled."
+    );
+
     return ids;
   } catch (err) {
     console.error("Failed to fetch/scrape Imgflip:", err.message || err);
