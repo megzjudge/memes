@@ -2,6 +2,7 @@
 
 export default {
   async fetch(request, env) {
+    // Serves static files from root or configured directory (index.html, script.js, styles.css, images/, etc.)
     return env.ASSETS.fetch(request);
   },
 
@@ -10,8 +11,7 @@ export default {
     const startTime = new Date().toISOString();
 
     const log = (level, msg, data = {}) => {
-      const prefix = `[${cronId}] ${startTime} [${level}]`;
-      console.log(`${prefix} ${msg}`, data);
+      console.log(`[${cronId}] ${startTime} [${level}] ${msg}`, data);
     };
 
     log("INFO", "Cron started");
@@ -20,28 +20,28 @@ export default {
     const pass = env.IMGFLIP_PASS;
 
     if (!user || !pass) {
-      log("ERROR", "Missing credentials", {
-        hasUser: !!user,
-        hasPass: !!pass
-      });
+      log("ERROR", "Missing IMGFLIP_USER or IMGFLIP_PASS");
       return;
     }
 
     try {
-      log("INFO", "1. Starting update-memes step (login + fetch page)");
-      await runUpdateMemes(env, user, pass);
+      // Step 1: Discover new memes
+      log("INFO", "Step 1: Discovering new memes");
+      const newItems = await discoverNewMemes(env, user, pass);
 
-      log("INFO", "2. Starting update-fill step");
-      await runUpdateFill(env);
+      // Step 2: Enrich / fill
+      log("INFO", "Step 2: Enriching new items");
+      await enrichItems(env, newItems);
 
-      log("INFO", "3. Starting update-views step");
-      await runUpdateViews(env);
+      // Step 3: Update views
+      log("INFO", "Step 3: Updating view counts");
+      await updateViewCounts(env);
 
-      log("INFO", "All three steps completed successfully");
+      log("INFO", "Full pipeline completed successfully");
     } catch (err) {
-      log("ERROR", "Scheduled task failed - full sequence aborted", {
+      log("ERROR", "Pipeline failed", {
         message: err.message,
-        stack: err.stack,
+        stack: err.stack || "No stack",
         cron: cronId,
         timestamp: new Date().toISOString()
       });
@@ -50,18 +50,9 @@ export default {
 };
 
 // ======================
-// Enhanced logging helper
+// Step 1: Discover new memes (from update-memes.mjs)
 // ======================
-function log(level, msg, data = {}) {
-  const timestamp = new Date().toISOString();
-  const prefix = `[${level}] ${timestamp}`;
-  console.log(`${prefix} ${msg}`, data);
-}
-
-// ======================
-// Step 1: update-memes.mjs logic
-// ======================
-async function runUpdateMemes(env, user, pass) {
+async function discoverNewMemes(env, user, pass) {
   try {
     log("INFO", "Fetching login page for CSRF");
 
@@ -69,28 +60,18 @@ async function runUpdateMemes(env, user, pass) {
       headers: { "User-Agent": "Mozilla/5.0" }
     });
 
-    log("DEBUG", "Login page response received", {
-      status: loginPageRes.status,
-      statusText: loginPageRes.statusText,
-      headers: Object.fromEntries(loginPageRes.headers)
-    });
-
     if (!loginPageRes.ok) {
       const text = await safeGetText(loginPageRes);
-      throw new Error(`Login page fetch failed: ${loginPageRes.status} - ${text.slice(0, 500)}`);
+      throw new Error(`Login page fetch failed: ${loginPageRes.status} - ${text.slice(0, 300)}`);
     }
 
     const loginPageHtml = await loginPageRes.text();
     const csrfMatch = loginPageHtml.match(/name="csrf_token" value="([^"]+)"/);
     const csrf = csrfMatch ? csrfMatch[1] : null;
 
-    if (!csrf) {
-      throw new Error("CSRF token not found in login page HTML");
-    }
+    if (!csrf) throw new Error("CSRF token not found in login page");
 
-    log("INFO", "CSRF token extracted successfully", { csrfPreview: csrf.substring(0, 15) + "..." });
-
-    log("INFO", "Sending login POST");
+    log("INFO", "CSRF extracted - attempting login");
 
     const loginRes = await fetch("https://imgflip.com/login", {
       method: "POST",
@@ -106,99 +87,366 @@ async function runUpdateMemes(env, user, pass) {
       })
     });
 
-    log("DEBUG", "Login POST response", {
-      status: loginRes.status,
-      redirected: loginRes.redirected,
-      url: loginRes.url
-    });
-
     if (!loginRes.ok) {
       const errorText = await safeGetText(loginRes);
-      throw new Error(`Login POST failed: ${loginRes.status} - ${errorText.slice(0, 500)}`);
+      throw new Error(`Login failed: ${loginRes.status} - ${errorText.slice(0, 300)}`);
     }
 
-    log("INFO", "Login successful - fetching latest memes page");
+    log("INFO", "Login success - fetching latest memes");
 
     const memesRes = await fetch("https://imgflip.com/all/user-images/mbtininja?sort=latest", {
       headers: { "User-Agent": "Mozilla/5.0" }
     });
 
-    if (!memesRes.ok) {
-      throw new Error(`Memes page fetch failed: ${memesRes.status}`);
-    }
+    if (!memesRes.ok) throw new Error(`Memes page fetch failed: ${memesRes.status}`);
 
     const html = await memesRes.text();
-    log("INFO", "Memes page fetched", { length: html.length });
 
-    // TODO: regex parsing
-    const items = []; // parse html here
-    log("INFO", "Parsed meme items", { count: items.length });
+    // Regex parsing (from your original update-memes.mjs)
+    const items = [];
+    const regexes = [
+      /href\s*=\s*["']?\/i\/([a-z0-9]{6,8})["'][^>]*>[\s\S]*?<img[^>]+src=["'](https:\/\/i\.imgflip\.com\/[a-z0-9]+\.(?:jpg|png|gif))["']/gi,
+      /href\s*=\s*["']?\/gif\/([a-z0-9]{6,8})["']/gi
+    ];
 
-    // TODO: KV storage for next steps
-    // await env.MEMES_KV.put("latest_meme_data", JSON.stringify(items));
+    const seen = new Set();
+    for (const rx of regexes) {
+      let match;
+      while ((match = rx.exec(html)) !== null) {
+        const id = match[1];
+        let imageUrl = match[2] || `https://i.imgflip.com/${id}.gif`;
+        if (!seen.has(id)) {
+          seen.add(id);
+          items.push({ id, imageUrl });
+        }
+      }
+    }
 
-    return items;
-  } catch (err) {
-    log("ERROR", "update-memes step failed", {
-      message: err.message,
-      stack: err.stack,
-      step: "runUpdateMemes"
+    log("INFO", "Discovered items", { count: items.length });
+
+    // Filter new ones (simple ID check from existing CSV in KV)
+    let existingCsv = await env.MEMES_KV.get("memes.csv") || "";
+    const existingIds = new Set();
+    if (existingCsv) {
+      const lines = existingCsv.split("\n");
+      for (let i = 1; i < lines.length; i++) {
+        const cols = lines[i].split(",");
+        if (cols[0]) existingIds.add(cols[0].trim().replace(/^"/, "").replace(/"$/, ""));
+      }
+    }
+
+    const trulyNew = items.filter(item => !existingIds.has(item.id));
+
+    // Append new rows to CSV (basic, no full header check yet)
+    let updatedCsv = existingCsv;
+    if (!updatedCsv) {
+      updatedCsv = "ID,URLS,IMAGE_URL,IS_GIF,TITLE,MEME_TYPE,KYM_SLUG,MBTI_TYPES,KEYWORDS,TAGS\n";
+    }
+
+    trulyNew.forEach(item => {
+      const isGif = item.imageUrl.toLowerCase().includes(".gif");
+      const row = [
+        item.id,
+        `https://imgflip.com/${isGif ? "gif" : "i"}/${item.id}`,
+        item.imageUrl,
+        isGif ? "TRUE" : "FALSE",
+        item.id, // title placeholder
+        "", "", "", "", ""
+      ];
+      updatedCsv += csvLine(row) + "\n";
     });
-    throw err; // re-throw so outer catch can log full sequence failure
-  }
-}
 
-// ======================
-// Step 2: update-fill.mjs
-// ======================
-async function runUpdateFill(env) {
-  try {
-    log("INFO", "Starting fill/discover step");
+    await env.MEMES_KV.put("memes.csv", updatedCsv);
 
-    // Example: read from previous step
-    // const previous = await env.MEMES_KV.get("latest_meme_data");
-    // ... process ...
+    log("INFO", "New items appended to KV", { count: trulyNew.length });
 
-    log("INFO", "Fill step complete");
+    return trulyNew;
   } catch (err) {
-    log("ERROR", "update-fill step failed", {
+    log("ERROR", "discoverNewMemes failed", {
       message: err.message,
       stack: err.stack,
-      step: "runUpdateFill"
+      step: "update-memes"
     });
     throw err;
   }
 }
 
 // ======================
-// Step 3: update-views.mjs
+// Step 2: Enrich / fill (from update-fill.mjs)
 // ======================
-async function runUpdateViews(env) {
+async function enrichItems(env, newItems) {
   try {
-    log("INFO", "Starting views update step");
+    log("INFO", "Starting enrichment", { newItemsCount: newItems.length });
 
-    // Example: read enriched data
-    // const filled = await env.MEMES_KV.get("filled_data");
-    // ... update views ...
+    let csvText = await env.MEMES_KV.get("memes.csv") || "";
+    let rows = parseCSV(csvText);
 
-    log("INFO", "Views update complete");
+    const MAX_ROWS_PER_RUN = 34;
+    let processed = 0;
+
+    for (const item of newItems.slice(0, MAX_ROWS_PER_RUN)) {
+      if (processed >= MAX_ROWS_PER_RUN) break;
+
+      const url = `https://imgflip.com/i/${item.id}`;
+      log("INFO", "Scraping for enrichment", { url });
+
+      const { title, imageUrl, tags, kymSlug } = await scrapePage(url);
+
+      const row = rows.find(r => r.id === item.id);
+      if (row) {
+        if (title) row.title = title;
+        if (imageUrl) row.image_url = imageUrl;
+        if (kymSlug) row.kym_slug = kymSlug;
+
+        const { mbti, memeType, keywords } = processTags(tags.split(", "));
+
+        row.mbti_types = mbti.join(", ");
+        row.meme_type = memeType.replace(/-/g, " ");
+        row.keywords = keywords.join(", ").replace(/-/g, " ");
+        row.tags = tags.replace(/-/g, " ");
+      }
+
+      processed++;
+      await sleep(250);
+    }
+
+    // Write back enriched CSV
+    const updatedCsv = "ID,URLS,IMAGE_URL,IS_GIF,TITLE,MEME_TYPE,KYM_SLUG,MBTI_TYPES,KEYWORDS,TAGS\n" +
+      rows.map(r => csvLine([
+        r.id, r.urls, r.image_url, r.is_gif, r.title, r.meme_type,
+        r.kym_slug, r.mbti_types, r.keywords, r.tags
+      ])).join("\n");
+
+    await env.MEMES_KV.put("memes.csv", updatedCsv);
+
+    log("INFO", "Enrichment complete", { processed });
   } catch (err) {
-    log("ERROR", "update-views step failed", {
+    log("ERROR", "enrichItems failed", {
       message: err.message,
       stack: err.stack,
-      step: "runUpdateViews"
+      step: "update-fill"
     });
     throw err;
   }
 }
 
 // ======================
-// Safe text reader (prevents text() errors from crashing log)
+// Step 3: Update views (from update-views.mjs)
 // ======================
-async function safeGetText(response) {
+async function updateViewCounts(env) {
   try {
-    return await response.text();
+    log("INFO", "Starting views update");
+
+    let csvText = await env.MEMES_KV.get("memes.csv") || "";
+    let rows = parseCSV(csvText);
+
+    const MAX_ITEMS = 350;
+    const REQUEST_DELAY_MS = 250;
+    let blockedCount = 0;
+    let updated = 0;
+    const results = [];
+
+    for (const row of rows.slice(0, MAX_ITEMS)) {
+      const id = row.id;
+      if (!id) continue;
+
+      const url = row.urls || `https://imgflip.com/i/${id}`;
+      const { views, blocked } = await fetchViewsForMeme(id);
+
+      if (blocked) {
+        blockedCount++;
+        const fallback = row.views || 0;
+        results.push({ id, views: fallback });
+        log("WARN", "Blocked - using fallback", { id, fallback });
+        if (blockedCount >= 8) {
+          log("WARN", "Stopping early - too many blocks");
+          break;
+        }
+      } else {
+        results.push({ id, views });
+        if (views !== (row.views || 0)) updated++;
+      }
+
+      await sleep(REQUEST_DELAY_MS);
+    }
+
+    // Write daily updates to KV (renamed to meme-views.csv)
+    const dailyCsv = "ID,URLS,VIEWS\n" + results.map(r =>
+      csvLine([r.id, `https://imgflip.com/i/${r.id}`, r.views])
+    ).join("\n");
+
+    await env.MEMES_KV.put("meme-views.csv", dailyCsv);
+
+    log("INFO", "Views update complete", { updated, blocked: blockedCount });
+  } catch (err) {
+    log("ERROR", "updateViewCounts failed", {
+      message: err.message,
+      stack: err.stack,
+      step: "update-views"
+    });
+    throw err;
+  }
+}
+
+// ======================
+// Shared helpers (combined from all three scripts)
+// ======================
+
+async function safeGetText(res) {
+  try { return await res.text(); } catch { return "Body not readable"; }
+}
+
+function sleep(ms) {
+  return new Promise(r => setTimeout(r, ms));
+}
+
+function csvEscape(value) {
+  const s = String(value ?? "");
+  if (/[",\n\r]/.test(s)) return `"${s.replace(/"/g, '""')}"`;
+  return s;
+}
+
+function csvLine(fields) {
+  return fields.map(csvEscape).join(",");
+}
+
+function parseCSV(text) {
+  const lines = text.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
+  if (lines.length < 1) return [];
+
+  const headers = lines[0].split(",").map(h => h.trim().toLowerCase());
+  const rows = [];
+
+  for (let i = 1; i < lines.length; i++) {
+    if (!lines[i].trim()) continue;
+    const cols = lines[i].split(",").map(c => c.trim());
+    const row = {};
+    headers.forEach((h, idx) => row[h] = cols[idx] || "");
+    rows.push(row);
+  }
+
+  return rows;
+}
+
+async function scrapePage(url) {
+  if (!url) return { title: "", imageUrl: "", tags: [], kymSlug: "" };
+
+  try {
+    const res = await fetch(url, { headers: { "User-Agent": "Mozilla/5.0" } });
+    if (!res.ok) return { title: "", imageUrl: "", tags: [], kymSlug: "" };
+
+    const html = await res.text();
+
+    const titleMatch = html.match(/<title>(.*?)<\/title>/i);
+    const title = titleMatch ? titleMatch[1].replace(" - Imgflip", "").trim() : "";
+
+    const imageMatch = html.match(/property="og:image" content="([^"]+)"/i);
+    const imageUrl = imageMatch ? imageMatch[1] : "";
+
+    const tagMatches = html.matchAll(/href='\/(tag|meme)\/([^']+)'/g);
+    const tags = [...tagMatches].map(m => m[2]).join(", ");
+
+    const kymMatch = html.match(/knowyourmeme.com\/memes\/([^"\/]+)/i);
+    const kymSlug = kymMatch ? kymMatch[1] : "";
+
+    return { title, imageUrl, tags, kymSlug };
+  } catch (err) {
+    log("ERROR", "scrapePage failed", { url, message: err.message });
+    return { title: "", imageUrl: "", tags: [], kymSlug: "" };
+  }
+}
+
+function processTags(tags) {
+  const mbti = tags.filter(t => MBTI_SET.has(t.toUpperCase()));
+  let memeType = "";
+  for (const t of tags) {
+    if (!MBTI_SET.has(t.toUpperCase()) && !MEME_TYPE_BLOCKLIST.has(t.toLowerCase())) {
+      memeType = t;
+      break;
+    }
+  }
+  memeType = memeType.replace(/-/g, " ");
+
+  const keywords = tags.filter(t => {
+    if (MBTI_SET.has(t.toUpperCase())) return false;
+    if (t === memeType) return false;
+    return true;
+  }).map(k => k.replace(/-/g, " "));
+
+  return { mbti, memeType, keywords };
+}
+
+async function fetchViewsForMeme(id) {
+  const url = `https://imgflip.com/i/${id}`;
+  const html = await fetchText(url);
+
+  if (!html) return { views: 0, blocked: true };
+
+  const head = html.slice(0, 6000).toLowerCase();
+  if (head.includes("captcha") || head.includes("unusual traffic")) {
+    return { views: 0, blocked: true };
+  }
+
+  const next = extractNextData(html);
+  if (next) {
+    let candidate = null;
+
+    candidate = getDeep(next, ["props", "pageProps", "image", "views"]);
+    if (candidate === null) candidate = getDeep(next, ["props", "pageProps", "data", "image", "views"]);
+    if (candidate === null) candidate = getDeep(next, ["props", "pageProps", "image", "view_count"]);
+    if (candidate === null) candidate = getDeep(next, ["props", "pageProps", "data", "image", "view_count"]);
+
+    const v = toInt(candidate);
+    if (Number.isFinite(v)) return { views: v, blocked: false };
+  }
+
+  // Fallback 1
+  const m1 = html.match(/"views"\s*:\s*(\d{1,12})/);
+  if (m1) return { views: Number(m1[1]), blocked: false };
+
+  // Fallback 2
+  const m2 = html.match(/([\d,]{1,15})\s+views/i);
+  if (m2) return { views: Number(m2[1].replace(/,/g, "")), blocked: false };
+
+  return { views: 0, blocked: false };
+}
+
+function getDeep(obj, path) {
+  let cur = obj;
+  for (const key of path) {
+    if (!cur || typeof cur !== "object" || !(key in cur)) return null;
+    cur = cur[key];
+  }
+  return cur;
+}
+
+function extractNextData(html) {
+  const match = html.match(/<script[^>]+id=["']__NEXT_DATA__["'][^>]*>([\s\S]*?)<\/script>/);
+  if (!match) return null;
+  try {
+    return JSON.parse(match[1]);
   } catch {
-    return "Response body could not be read";
+    return null;
   }
 }
+
+async function fetchText(url) {
+  try {
+    const res = await fetch(url, { headers: IMGFLIP_HEADERS });
+    if (!res.ok) return "";
+    return await res.text();
+  } catch {
+    return "";
+  }
+}
+
+const IMGFLIP_HEADERS = {
+  "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+  Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+  "Accept-Language": "en-US,en;q=0.9",
+  Referer: "https://imgflip.com/"
+};
+
+const MBTI_TYPES = ["ESTP","ISTP","ESFP","ISFP","ESTJ","ISTJ","ESFJ","ISFJ","ENFP","INFP","ENFJ","INFJ","ENTJ","INTJ","ENTP","INTP"];
+const MBTI_SET = new Set(MBTI_TYPES);
+const MEME_TYPE_BLOCKLIST = new Set(["memes","mbti","myers briggs","personality"]);
