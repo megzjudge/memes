@@ -65,7 +65,7 @@ async function discoverNewMemes(env, user, pass, log) {
 
     const loginPageHtml = await loginPageRes.text();
     const csrfMatch = loginPageHtml.match(/name="csrf_token" value="([^"]+)"/);
-    const csrf = csrfMatch ? csrfMatch[1] : null;
+    const csrf = csrfMatch ? csrfMatch : null;
 
     if (!csrf) throw new Error("CSRF token not found");
 
@@ -106,8 +106,8 @@ async function discoverNewMemes(env, user, pass, log) {
     for (const rx of regexes) {
       let match;
       while ((match = rx.exec(html)) !== null) {
-        const id = match[1];
-        let imageUrl = match[2] || `https://i.imgflip.com/${id}.gif`;
+        const id = match;
+        let imageUrl = match || `https://i.imgflip.com/${id}.gif`;
         if (!seen.has(id)) {
           seen.add(id);
           items.push({ id, imageUrl });
@@ -121,7 +121,7 @@ async function discoverNewMemes(env, user, pass, log) {
       const lines = existingCsv.split("\n");
       for (let i = 1; i < lines.length; i++) {
         const cols = lines[i].split(",");
-        if (cols[0]) existingIds.add(cols[0].trim().replace(/^"/, "").replace(/"$/, ""));
+        if (cols) existingIds.add(cols.trim().replace(/^"/, "").replace(/"$/, ""));
       }
     }
 
@@ -144,6 +144,7 @@ async function discoverNewMemes(env, user, pass, log) {
     });
 
     await env.MEMES_KV.put("memes.csv", updatedCsv);
+    await updateGitHubFile(env, "memes.csv", updatedCsv, log);
 
     log("INFO", `Added ${trulyNew.length} new rows to memes.csv`);
     return trulyNew;
@@ -220,6 +221,7 @@ async function enrichItems(env, newItems, log) {
       rows.map(r => csvLine([r.id, r.urls, r.image_url, r.is_gif, r.title, r.meme_type, r.kym_slug, r.mbti_types, r.keywords, r.tags])).join("\n");
 
     await env.MEMES_KV.put("memes.csv", updatedCsv);
+    await updateGitHubFile(env, "memes.csv", updatedCsv, log);
 
     log("INFO", `Edited ${editedCount} rows in memes.csv during enrichment`);
     return editedCount;
@@ -282,6 +284,7 @@ async function updateViewCounts(env, log) {
     ).join("\n");
 
     await env.MEMES_KV.put("meme-views.csv", dailyCsv);
+    await updateGitHubFile(env, "meme-views.csv", dailyCsv, log);
 
     log("INFO", `Updated ${updatedCount} rows in meme-views.csv (out of ${results.length} processed)`);
     return updatedCount;
@@ -317,7 +320,7 @@ function parseCSV(text) {
   const lines = text.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
   if (lines.length < 1) return [];
 
-  const headers = lines[0].split(",").map(h => h.trim().toLowerCase());
+  const headers = lines.split(",").map(h => h.trim().toLowerCase());
   const rows = [];
 
   for (let i = 1; i < lines.length; i++) {
@@ -341,16 +344,16 @@ async function scrapePage(url) {
     const html = await res.text();
 
     const titleMatch = html.match(/<title>(.*?)<\/title>/i);
-    const title = titleMatch ? titleMatch[1].replace(" - Imgflip", "").trim() : "";
+    const title = titleMatch ? titleMatch.replace(" - Imgflip", "").trim() : "";
 
     const imageMatch = html.match(/property="og:image" content="([^"]+)"/i);
-    const imageUrl = imageMatch ? imageMatch[1] : "";
+    const imageUrl = imageMatch ? imageMatch : "";
 
     const tagMatches = html.matchAll(/href='\/(tag|meme)\/([^']+)'/g);
-    const tags = [...tagMatches].map(m => m[2]).join(", ");
+    const tags = [...tagMatches].map(m => m).join(", ");
 
     const kymMatch = html.match(/knowyourmeme.com\/memes\/([^"\/]+)/i);
-    const kymSlug = kymMatch ? kymMatch[1] : "";
+    const kymSlug = kymMatch ? kymMatch : "";
 
     return { title, imageUrl, tags, kymSlug };
   } catch {
@@ -402,10 +405,10 @@ async function fetchViewsForMeme(id) {
   }
 
   const m1 = html.match(/"views"\s*:\s*(\d{1,12})/);
-  if (m1) return { views: Number(m1[1]), blocked: false };
+  if (m1) return { views: Number(m1), blocked: false };
 
   const m2 = html.match(/([\d,]{1,15})\s+views/i);
-  if (m2) return { views: Number(m2[1].replace(/,/g, "")), blocked: false };
+  if (m2) return { views: Number(m2.replace(/,/g, "")), blocked: false };
 
   return { views: 0, blocked: false };
 }
@@ -423,7 +426,7 @@ function extractNextData(html) {
   const match = html.match(/<script[^>]+id=["']__NEXT_DATA__["'][^>]*>([\s\S]*?)<\/script>/);
   if (!match) return null;
   try {
-    return JSON.parse(match[1]);
+    return JSON.parse(match);
   } catch {
     return null;
   }
@@ -443,6 +446,66 @@ function toInt(value) {
   if (typeof value === 'number') return value;
   if (typeof value === 'string') return parseInt(value, 10);
   return 0;
+}
+
+async function updateGitHubFile(env, filename, content, log) {
+  const owner = env.GITHUB_OWNER;
+  const repo = env.GITHUB_REPO;
+  const token = env.GITHUB_TOKEN;
+
+  if (!owner || !repo || !token) {
+    log("WARN", `GitHub credentials missing, skipping ${filename} upload`);
+    return;
+  }
+
+  try {
+    // Get current file SHA (if it exists)
+    const getRes = await fetch(
+      `https://api.github.com/repos/${owner}/${repo}/contents/${filename}`,
+      {
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "User-Agent": "Cloudflare-Worker",
+          Accept: "application/vnd.github+json"
+        }
+      }
+    );
+
+    let sha = null;
+    if (getRes.ok) {
+      const fileData = await getRes.json();
+      sha = fileData.sha;
+    }
+
+    // Update or create the file
+    const putRes = await fetch(
+      `https://api.github.com/repos/${owner}/${repo}/contents/${filename}`,
+      {
+        method: "PUT",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+          "User-Agent": "Cloudflare-Worker",
+          Accept: "application/vnd.github+json"
+        },
+        body: JSON.stringify({
+          message: `Update ${filename} via Cloudflare Worker`,
+          content: btoa(content),
+          sha
+        })
+      }
+    );
+
+    if (!putRes.ok) {
+      const error = await putRes.json();
+      log("ERROR", `GitHub API error for ${filename}`, { status: putRes.status, message: error.message });
+      return;
+    }
+
+    log("INFO", `Successfully synced ${filename} to GitHub`);
+  } catch (err) {
+    log("ERROR", `Failed to update ${filename} on GitHub`, { message: err.message });
+  }
 }
 
 const IMGFLIP_HEADERS = {
