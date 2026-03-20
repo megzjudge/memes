@@ -25,15 +25,19 @@ export default {
 
     try {
       log("INFO", "Step 1: Discovering new memes");
-      const newItems = await discoverNewMemes(env, user, pass);
+      const newItems = await discoverNewMemes(env, user, pass, log);
 
       log("INFO", "Step 2: Enriching new items");
-      await enrichItems(env, newItems);
+      const editedCount = await enrichItems(env, newItems, log);
 
       log("INFO", "Step 3: Updating view counts");
-      await updateViewCounts(env);
+      const updatedViewCount = await updateViewCounts(env, log);
 
-      log("INFO", "Full pipeline completed successfully");
+      log("INFO", "Full pipeline completed successfully", {
+        newMemesAdded: newItems.length,
+        rowsEdited: editedCount,
+        viewRowsUpdated: updatedViewCount
+      });
     } catch (err) {
       log("ERROR", "Pipeline failed", {
         message: err.message,
@@ -48,7 +52,7 @@ export default {
 // ======================
 // Step 1: Discover new memes
 // ======================
-async function discoverNewMemes(env, user, pass) {
+async function discoverNewMemes(env, user, pass, log) {
   try {
     const loginPageRes = await fetch("https://imgflip.com/login", {
       headers: { "User-Agent": "Mozilla/5.0" }
@@ -122,6 +126,8 @@ async function discoverNewMemes(env, user, pass) {
     }
 
     const trulyNew = items.filter(item => !existingIds.has(item.id));
+    
+    log("INFO", `Found ${trulyNew.length} truly new memes to add to memes.csv`);
 
     let updatedCsv = existingCsv || "ID,URLS,IMAGE_URL,IS_GIF,TITLE,MEME_TYPE,KYM_SLUG,MBTI_TYPES,KEYWORDS,TAGS\n";
     trulyNew.forEach(item => {
@@ -139,6 +145,7 @@ async function discoverNewMemes(env, user, pass) {
 
     await env.MEMES_KV.put("memes.csv", updatedCsv);
 
+    log("INFO", `Added ${trulyNew.length} new rows to memes.csv`);
     return trulyNew;
   } catch (err) {
     log("ERROR", "discoverNewMemes failed", { message: err.message, stack: err.stack });
@@ -149,13 +156,14 @@ async function discoverNewMemes(env, user, pass) {
 // ======================
 // Step 2: Enrich / fill
 // ======================
-async function enrichItems(env, newItems) {
+async function enrichItems(env, newItems, log) {
   try {
     let csvText = await env.MEMES_KV.get("memes.csv") || "";
     let rows = parseCSV(csvText);
 
     const MAX_ROWS_PER_RUN = 34;
     let processed = 0;
+    let editedCount = 0;
 
     for (const item of newItems.slice(0, MAX_ROWS_PER_RUN)) {
       if (processed >= MAX_ROWS_PER_RUN) break;
@@ -165,16 +173,43 @@ async function enrichItems(env, newItems) {
 
       const row = rows.find(r => r.id === item.id);
       if (row) {
-        if (title) row.title = title;
-        if (imageUrl) row.image_url = imageUrl;
-        if (kymSlug) row.kym_slug = kymSlug;
+        let changes = 0;
+        
+        if (title && title !== row.title) { 
+          row.title = title; 
+          changes++;
+        }
+        if (imageUrl && imageUrl !== row.image_url) { 
+          row.image_url = imageUrl; 
+          changes++;
+        }
+        if (kymSlug && kymSlug !== row.kym_slug) { 
+          row.kym_slug = kymSlug; 
+          changes++;
+        }
 
         const { mbti, memeType, keywords } = processTags(tags.split(", "));
 
-        row.mbti_types = mbti.join(", ");
-        row.meme_type = memeType.replace(/-/g, " ");
-        row.keywords = keywords.join(", ").replace(/-/g, " ");
-        row.tags = tags.replace(/-/g, " ");
+        if (mbti.join(", ") !== row.mbti_types) {
+          row.mbti_types = mbti.join(", ");
+          changes++;
+        }
+        if (memeType.replace(/-/g, " ") !== row.meme_type) {
+          row.meme_type = memeType.replace(/-/g, " ");
+          changes++;
+        }
+        if (keywords.join(", ").replace(/-/g, " ") !== row.keywords) {
+          row.keywords = keywords.join(", ").replace(/-/g, " ");
+          changes++;
+        }
+        if (tags.replace(/-/g, " ") !== row.tags) {
+          row.tags = tags.replace(/-/g, " ");
+          changes++;
+        }
+
+        if (changes > 0) {
+          editedCount++;
+        }
       }
 
       processed++;
@@ -185,6 +220,9 @@ async function enrichItems(env, newItems) {
       rows.map(r => csvLine([r.id, r.urls, r.image_url, r.is_gif, r.title, r.meme_type, r.kym_slug, r.mbti_types, r.keywords, r.tags])).join("\n");
 
     await env.MEMES_KV.put("memes.csv", updatedCsv);
+
+    log("INFO", `Edited ${editedCount} rows in memes.csv during enrichment`);
+    return editedCount;
   } catch (err) {
     log("ERROR", "enrichItems failed", { message: err.message, stack: err.stack });
     throw err;
@@ -194,7 +232,7 @@ async function enrichItems(env, newItems) {
 // ======================
 // Step 3: Update views
 // ======================
-async function updateViewCounts(env) {
+async function updateViewCounts(env, log) {
   try {
     let csvText = await env.MEMES_KV.get("memes.csv") || "";
     let rows = parseCSV(csvText);
@@ -202,8 +240,18 @@ async function updateViewCounts(env) {
     const MAX_ITEMS = 350;
     const REQUEST_DELAY_MS = 250;
     let blockedCount = 0;
-    let updated = 0;
+    let updatedCount = 0;
     const results = [];
+
+    // Get existing view data to compare
+    let existingViewCsv = await env.MEMES_KV.get("meme-views.csv") || "";
+    const existingViews = new Map();
+    if (existingViewCsv) {
+      const viewRows = parseCSV(existingViewCsv);
+      viewRows.forEach(r => {
+        if (r.id) existingViews.set(r.id, parseInt(r.views) || 0);
+      });
+    }
 
     for (const row of rows.slice(0, MAX_ITEMS)) {
       const id = row.id;
@@ -218,7 +266,12 @@ async function updateViewCounts(env) {
         if (blockedCount >= 8) break;
       } else {
         results.push({ id, views });
-        if (views !== (row.views || 0)) updated++;
+        
+        // Check if this view count is different from existing
+        const prevViews = existingViews.get(id) || 0;
+        if (views !== prevViews) {
+          updatedCount++;
+        }
       }
 
       await sleep(REQUEST_DELAY_MS);
@@ -229,6 +282,9 @@ async function updateViewCounts(env) {
     ).join("\n");
 
     await env.MEMES_KV.put("meme-views.csv", dailyCsv);
+
+    log("INFO", `Updated ${updatedCount} rows in meme-views.csv (out of ${results.length} processed)`);
+    return updatedCount;
   } catch (err) {
     log("ERROR", "updateViewCounts failed", { message: err.message, stack: err.stack });
     throw err;
@@ -381,6 +437,12 @@ async function fetchText(url) {
   } catch {
     return "";
   }
+}
+
+function toInt(value) {
+  if (typeof value === 'number') return value;
+  if (typeof value === 'string') return parseInt(value, 10);
+  return 0;
 }
 
 const IMGFLIP_HEADERS = {
