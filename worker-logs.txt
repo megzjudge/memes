@@ -1,0 +1,7 @@
+[*/5 * * * *] 2026-03-20T20:25:50.788Z [INFO] Cron started
+[*/5 * * * *] 2026-03-20T20:25:50.788Z [INFO] Step 1: Discovering new memes
+[*/5 * * * *] 2026-03-20T20:25:50.788Z [DEBUG] Fetching login page...
+[*/5 * * * *] 2026-03-20T20:25:50.788Z [DEBUG] Login page fetched, extracting CSRF token...
+[*/5 * * * *] 2026-03-20T20:25:50.788Z [ERROR] discoverNewMemes failed {"message":"CSRF token not found","stack":"Error: CSRF token not found\n    at discoverNewMemes (worker.js:70:22)\n    at async Object.scheduled (worker.js:28:24)"}
+[*/5 * * * *] 2026-03-20T20:25:50.788Z [ERROR] Pipeline failed {"message":"CSRF token not found","stack":"Error: CSRF token not found\n    at discoverNewMemes (worker.js:70:22)\n    at async Object.scheduled (worker.js:28:24)","cron":"*/5 * * * *","timestamp":"2026-03-20T20:25:51.022Z"}
+
