@@ -32,7 +32,7 @@ jobs:
 
       # 5️⃣ Run the meme discovery script
       - name: Discover missing meme data
-        run: node discover-ids.mjs
+        run: node update-fill.mjs
 
       # 6️⃣ Commit memes.csv if any changes were made
       - name: Commit updated memes.csv
