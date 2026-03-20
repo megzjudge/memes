@@ -18,8 +18,17 @@ jobs:
         with:
           node-version: "20"
 
+      - name: Set Imgflip credentials
+        env:
+          IMGFLIP_USER: ${{ secrets.IMGFLIP_USER }}
+          IMGFLIP_PASS: ${{ secrets.IMGFLIP_PASS }}
+        run: echo "Credentials loaded"
+
       - name: Update memes.csv from latest Imgflip discovery
         run: node update-memes.mjs
+        env:
+          IMGFLIP_USER: ${{ secrets.IMGFLIP_USER }}
+          IMGFLIP_PASS: ${{ secrets.IMGFLIP_PASS }}
 
       - name: Commit changes if any
         run: |
