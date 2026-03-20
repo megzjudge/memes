@@ -7,8 +7,10 @@ directory = "."                     # ← dot = current directory (repo root)
 binding = "ASSETS"                  # ← still required
 
 [[triggers.crons]]
-crons = [
-  "0 11 * * *",
-  "30 11 * * *",
-  "0 12 * * *"
-]
+cron = "0 11 * * *"
+
+[[triggers.crons]]
+cron = "30 11 * * *"
+
+[[triggers.crons]]
+cron = "0 12 * * *"
