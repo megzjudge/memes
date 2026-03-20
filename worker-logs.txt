@@ -70,3 +70,12 @@ a.send();
 [*/5 * * * *] 2026-03-20T20:35:50.797Z [ERROR] discoverNewMemes failed {"message":"CSRF token not found in AJAX response","stack":"Error: CSRF token not found in AJAX response\n    at discoverNewMemes (worker.js:75:13)\n    at async Object.scheduled (worker.js:28:24)"}
 [*/5 * * * *] 2026-03-20T20:35:50.797Z [ERROR] Pipeline failed {"message":"CSRF token not found in AJAX response","stack":"Error: CSRF token not found in AJAX response\n    at discoverNewMemes (worker.js:75:13)\n    at async Object.scheduled (worker.js:28:24)","cron":"*/5 * * * *","timestamp":"2026-03-20T20:35:51.035Z"}
 
+[*/5 * * * *] 2026-03-20T20:40:51.988Z [INFO] Cron started
+[*/5 * * * *] 2026-03-20T20:40:51.988Z [INFO] Step 1: Discovering new memes
+[*/5 * * * *] 2026-03-20T20:40:51.988Z [DEBUG] Fetching CSRF token from AJAX endpoint...
+[*/5 * * * *] 2026-03-20T20:40:51.988Z [DEBUG] AJAX response status: 200
+[*/5 * * * *] 2026-03-20T20:40:51.988Z [DEBUG] AJAX data keys: user, done, surveyed
+[*/5 * * * *] 2026-03-20T20:40:51.988Z [DEBUG] Full AJAX response: {"user":{"id":0,"pro_type":"","icon":0,"user":"","points":0,"priv":0,"flags":0,"email_verified":0},"done":1,"surveyed":true}
+[*/5 * * * *] 2026-03-20T20:40:51.988Z [ERROR] discoverNewMemes failed {"message":"CSRF token not found in AJAX response","stack":"Error: CSRF token not found in AJAX response\n    at discoverNewMemes (worker.js:75:13)\n    at async Object.scheduled (worker.js:28:24)"}
+[*/5 * * * *] 2026-03-20T20:40:51.988Z [ERROR] Pipeline failed {"message":"CSRF token not found in AJAX response","stack":"Error: CSRF token not found in AJAX response\n    at discoverNewMemes (worker.js:75:13)\n    at async Object.scheduled (worker.js:28:24)","cron":"*/5 * * * *","timestamp":"2026-03-20T20:40:52.329Z"}
+
