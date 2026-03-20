@@ -18,11 +18,14 @@ jobs:
         with:
           node-version: "20"
 
-      - name: Set Imgflip credentials
+      # Optional debug for secrets
+      - name: Debug secrets
+        run: |
+          echo "IMGFLIP_USER: $([[ -n $IMGFLIP_USER ]] && echo set || echo not set)"
+          echo "IMGFLIP_PASS: $([[ -n $IMGFLIP_PASS ]] && echo set || echo not set)"
         env:
           IMGFLIP_USER: ${{ secrets.IMGFLIP_USER }}
           IMGFLIP_PASS: ${{ secrets.IMGFLIP_PASS }}
-        run: echo "Credentials loaded"
 
       - name: Update memes.csv from latest Imgflip discovery
         run: node update-memes.mjs
