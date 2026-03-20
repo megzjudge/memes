@@ -579,3 +579,10 @@ mm=0;
 [*/5 * * * *] 2026-03-20T22:30:45.225Z [ERROR] discoverNewMemes failed {"message":"Unable to create new browser: code: 429: message: Rate limit exceeded","stack":"Error: Unable to create new browser: code: 429: message: Rate limit exceeded\n    at PuppeteerWorkers.launch (worker.js:14811:13)\n    at async discoverNewMemes (worker.js:16365:17)\n    at async Object.scheduled (worker.js:16328:24)"}
 [*/5 * * * *] 2026-03-20T22:30:45.225Z [ERROR] Pipeline failed {"message":"Unable to create new browser: code: 429: message: Rate limit exceeded","stack":"Error: Unable to create new browser: code: 429: message: Rate limit exceeded\n    at PuppeteerWorkers.launch (worker.js:14811:13)\n    at async discoverNewMemes (worker.js:16365:17)\n    at async Object.scheduled (worker.js:16328:24)","cron":"*/5 * * * *","timestamp":"2026-03-20T22:30:48.891Z"}
 
+[*/5 * * * *] 2026-03-20T22:35:45.128Z [INFO] Cron started
+[*/5 * * * *] 2026-03-20T22:35:45.128Z [INFO] Step 1: Discovering new memes
+[*/5 * * * *] 2026-03-20T22:35:45.128Z [DEBUG] Launching browser...
+[*/5 * * * *] 2026-03-20T22:35:45.128Z [WARN] Initial browser launch failed, retrying fresh... {"message":"Unable to create new browser: code: 429: message: Rate limit exceeded"}
+[*/5 * * * *] 2026-03-20T22:35:45.128Z [ERROR] discoverNewMemes failed {"message":"Unable to create new browser: code: 429: message: Rate limit exceeded","stack":"Error: Unable to create new browser: code: 429: message: Rate limit exceeded\n    at PuppeteerWorkers.launch (worker.js:14811:13)\n    at async discoverNewMemes (worker.js:16365:17)\n    at async Object.scheduled (worker.js:16328:24)"}
+[*/5 * * * *] 2026-03-20T22:35:45.128Z [ERROR] Pipeline failed {"message":"Unable to create new browser: code: 429: message: Rate limit exceeded","stack":"Error: Unable to create new browser: code: 429: message: Rate limit exceeded\n    at PuppeteerWorkers.launch (worker.js:14811:13)\n    at async discoverNewMemes (worker.js:16365:17)\n    at async Object.scheduled (worker.js:16328:24)","cron":"*/5 * * * *","timestamp":"2026-03-20T22:35:48.464Z"}
+
