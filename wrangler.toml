@@ -3,8 +3,8 @@ main = "worker.js"
 compatibility_date = "2026-03-20"
 
 [assets]
-directory = "."                     # ← dot = current directory (repo root)
-binding = "ASSETS"                  # ← still required
+directory = "."
+binding = "ASSETS"
 
 [[triggers.crons]]
 cron = "0 11 * * *"
