@@ -72,7 +72,7 @@ async function discoverNewMemes(env, user, pass, log) {
   let browser;
   try {
     log("DEBUG", "Launching browser...");
-    browser = await puppeteer.launch(env.MEMES);
+    browser = await puppeteer.launch(env.MEMES, { keep_alive: false });
 
     const page = await browser.newPage();
     log("DEBUG", "Browser launched, navigating to login page...");
