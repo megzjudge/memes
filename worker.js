@@ -32,9 +32,15 @@ export default {
       const newItems = await discoverNewMemes(env, user, pass, log);
       log("INFO", `✅ Step 1 Complete: ${newItems.length} rows added`);
 
+      log("INFO", "Waiting 10 seconds before Step 2...");
+      await sleep(10000);
+
       log("INFO", "Step 2: Enriching new items");
       const editedCount = await enrichItems(env, newItems, log);
       log("INFO", `✅ Step 2 Complete: ${editedCount} rows edited`);
+
+      log("INFO", "Waiting 10 seconds before Step 3...");
+      await sleep(10000);
 
       log("INFO", "Step 3: Updating view counts");
       const updatedViewCount = await updateViewCounts(env, log);
