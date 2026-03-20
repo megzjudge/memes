@@ -1,14 +1,10 @@
-name = "memes-discovery"
-main = "worker.js"
-compatibility_date = "2026-01-17"
+name = "memes"
+main = "script.js"
+compatibility_date = "2026-03-20"
 
 [triggers]
-crons = ["30 11 * * *"] # daily at 10:30pm Sydney (AEDT) - your chosen time
-
-[vars]
-IMGFLIP_USERNAME = "mbtininja"
-GITHUB_OWNER = "megzjudge"
-GITHUB_REPO = "memes"
-GITHUB_BRANCH = "main"
-GITHUB_PATH = "latest_ids.json"
-TOP_N = "14"
+crons = [
+  "0 11 * * *",     # \~10:00 PM AEDT – new memes discovery
+  "30 11 * * *",    # \~10:30 PM AEDT – fill/enrich new memes
+  "0 12 * * *",     # \~11:00 PM AEDT – full views refresh
+]
