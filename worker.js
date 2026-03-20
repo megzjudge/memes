@@ -1,4 +1,5 @@
 // worker.js
+import puppeteer from "@cloudflare/puppeteer";
 
 export default {
   async fetch(request, env) {
@@ -68,106 +69,37 @@ export default {
 // Step 1: Discover new memes
 // ======================
 async function discoverNewMemes(env, user, pass, log) {
+  let browser;
   try {
-    log("DEBUG", "Fetching login page to get CSRF cookie...");
-    const loginPageRes = await fetch("https://imgflip.com/login", {
-      headers: { "User-Agent": "Mozilla/5.0" },
-      redirect: "follow"
+    log("DEBUG", "Launching browser...");
+    browser = await puppeteer.launch(env.MEMES);
+
+    const page = await browser.newPage();
+    log("DEBUG", "Browser launched, navigating to login page...");
+
+    await page.goto("https://imgflip.com/login", { waitUntil: "networkidle0" });
+    log("DEBUG", "Login page loaded");
+
+    log("DEBUG", "Filling in login form...");
+    await page.type("#username", user);
+    await page.type("#password", pass);
+
+    log("DEBUG", "Submitting login form...");
+    await Promise.all([
+      page.waitForNavigation({ waitUntil: "networkidle0" }),
+      page.click("#login-submit")
+    ]);
+
+    log("DEBUG", "Login complete, checking current URL...");
+    const currentUrl = page.url();
+    log("DEBUG", `Current URL after login: ${currentUrl}`);
+
+    log("DEBUG", "Navigating to memes page...");
+    await page.goto("https://imgflip.com/all/user-images/mbtininja?sort=latest", {
+      waitUntil: "networkidle0"
     });
 
-    log("DEBUG", `Login page status: ${loginPageRes.status}`);
-
-    if (!loginPageRes.ok) {
-      const text = await safeGetText(loginPageRes);
-      throw new Error(`Login page fetch failed: ${loginPageRes.status} - ${text.slice(0, 300)}`);
-    }
-
-    // Try to get CSRF from cookies
-    const setCookieHeader = loginPageRes.headers.get("set-cookie");
-    log("DEBUG", `Set-Cookie header: ${setCookieHeader}`);
-
-    let csrf = null;
-
-    // Try cookie first
-    const csrfCookieMatch = setCookieHeader?.match(/csrf[_-]?token=([^;]+)/i);
-    if (csrfCookieMatch) {
-      csrf = csrfCookieMatch;
-      log("DEBUG", `CSRF found in cookie: ${csrf}`);
-    }
-
-    // Fallback: search HTML
-    if (!csrf) {
-      const loginPageHtml = await loginPageRes.text();
-      log("DEBUG", `Searching HTML for CSRF (length: ${loginPageHtml.length})...`);
-      log("DEBUG", `Login page HTML preview: ${loginPageHtml.slice(0, 500)}`);
-
-      // Try various CSRF patterns
-      const patterns = [
-        /name="csrf_token" value="([^"]+)"/,
-        /csrf[_-]?token["'\s:=]+([a-zA-Z0-9_-]{20,})/i,
-        /"csrf[_-]?token"\s*:\s*"([^"]+)"/i,
-        /csrf[_-]?token=([a-zA-Z0-9_-]{20,})/i
-      ];
-
-      for (const pattern of patterns) {
-        const match = loginPageHtml.match(pattern);
-        if (match) {
-          csrf = match;
-          log("DEBUG", `CSRF found in HTML with pattern ${pattern}: ${csrf}`);
-          break;
-        }
-      }
-
-      if (!csrf) {
-        log("DEBUG", `Full login HTML (first 2000 chars): ${loginPageHtml.slice(0, 2000)}`);
-        throw new Error("CSRF token not found in cookies or HTML");
-      }
-    }
-
-    log("DEBUG", "Attempting login...");
-    const loginRes = await fetch("https://imgflip.com/login", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/x-www-form-urlencoded",
-        "User-Agent": "Mozilla/5.0",
-        "Referer": "https://imgflip.com/login",
-        "Cookie": setCookieHeader || ""
-      },
-      body: new URLSearchParams({
-        username: user,
-        password: pass,
-        csrf_token: csrf
-      }),
-      redirect: "follow"
-    });
-
-    log("DEBUG", `Login response status: ${loginRes.status}`);
-    const loginCookies = loginRes.headers.get("set-cookie");
-    log("DEBUG", `Login response cookies: ${loginCookies}`);
-
-    if (!loginRes.ok) {
-      const errorText = await safeGetText(loginRes);
-      throw new Error(`Login failed: ${loginRes.status} - ${errorText.slice(0, 300)}`);
-    }
-
-    log("DEBUG", "Login successful, fetching memes page...");
-
-    // Combine cookies for authenticated request
-    const allCookies = [setCookieHeader, loginCookies].filter(Boolean).join("; ");
-    log("DEBUG", `Using cookies: ${allCookies.slice(0, 200)}`);
-
-    const memesRes = await fetch("https://imgflip.com/all/user-images/mbtininja?sort=latest", {
-      headers: {
-        "User-Agent": "Mozilla/5.0",
-        "Cookie": allCookies,
-        "Referer": "https://imgflip.com/"
-      }
-    });
-
-    log("DEBUG", `Memes page response status: ${memesRes.status}`);
-    if (!memesRes.ok) throw new Error(`Memes page fetch failed: ${memesRes.status}`);
-
-    const html = await memesRes.text();
+    const html = await page.content();
     log("DEBUG", `Memes page fetched (${html.length} bytes)`);
     log("DEBUG", `Memes page preview: ${html.slice(0, 500)}`);
 
@@ -235,6 +167,11 @@ async function discoverNewMemes(env, user, pass, log) {
   } catch (err) {
     log("ERROR", "discoverNewMemes failed", { message: err.message, stack: err.stack });
     throw err;
+  } finally {
+    if (browser) {
+      await browser.close();
+      log("DEBUG", "Browser closed");
+    }
   }
 }
 
@@ -750,4 +687,4 @@ const IMGFLIP_HEADERS = {
 const MBTI_TYPES = ["ESTP","ISTP","ESFP","ISFP","ESTJ","ISTJ","ESFJ","ISFJ","ENFP","INFP","ENFJ","INFJ","ENTJ","INTJ","ENTP","INTP"];
 const MBTI_SET = new Set(MBTI_TYPES);
 const MEME_TYPE_BLOCKLIST = new Set(["memes","mbti","myers briggs","personality"]);
-    
+                     
