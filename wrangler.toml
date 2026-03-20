@@ -2,9 +2,13 @@ name = "memes"
 main = "worker.js"
 compatibility_date = "2026-03-20"
 
-[triggers]
+[assets]
+directory = "."                     # ← dot = current directory (repo root)
+binding = "ASSETS"                  # ← still required
+
+[[triggers.crons]]
 crons = [
-  "0 11 * * *",     # \~10:00 PM AEDT – new memes discovery
-  "30 11 * * *",    # \~10:30 PM AEDT – fill/enrich new memes
-  "0 12 * * *",     # \~11:00 PM AEDT – full views refresh
+  "0 11 * * *",
+  "30 11 * * *",
+  "0 12 * * *"
 ]
