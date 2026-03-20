@@ -5,12 +5,3 @@ compatibility_date = "2026-03-20"
 [assets]
 directory = "."
 binding = "ASSETS"
-
-[[triggers.crons]]
-cron = "0 11 * * *"
-
-[[triggers.crons]]
-cron = "30 11 * * *"
-
-[[triggers.crons]]
-cron = "0 12 * * *"
