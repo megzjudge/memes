@@ -1,17 +1,17 @@
 name = "memes"
 main = "worker.js"
 compatibility_date = "2026-03-20"
+compatibility_flags = ["nodejs_compat"]
 
 [assets]
 directory = "."
 binding = "ASSETS"
 
-[triggers]
-crons = [
-  "*/5 * * * *"
-]
+[[browser]]
+binding = "MEMES"
 
-browser = { binding = "MEMES" }
+[triggers]
+crons = ["*/5 * * * *"]
 
 [observability]
 enabled = false
