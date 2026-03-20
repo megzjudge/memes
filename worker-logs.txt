@@ -544,3 +544,10 @@ mm=0;
 [*/5 * * * *] 2026-03-20T22:05:45.133Z [ERROR] discoverNewMemes failed {"message":"Invalid URL: /v1/acquire","stack":"TypeError: Invalid URL: /v1/acquire\n    at PuppeteerWorkers.launch (worker.js:13662:32)\n    at discoverNewMemes (worker.js:13738:46)\n    at async Object.scheduled (worker.js:13701:24)"}
 [*/5 * * * *] 2026-03-20T22:05:45.133Z [ERROR] Pipeline failed {"message":"Invalid URL: /v1/acquire","stack":"TypeError: Invalid URL: /v1/acquire\n    at PuppeteerWorkers.launch (worker.js:13662:32)\n    at discoverNewMemes (worker.js:13738:46)\n    at async Object.scheduled (worker.js:13701:24)","cron":"*/5 * * * *","timestamp":"2026-03-20T22:05:48.133Z"}
 
+[*/5 * * * *] 2026-03-20T22:10:45.227Z [INFO] Cron started
+[*/5 * * * *] 2026-03-20T22:10:45.227Z [INFO] Step 1: Discovering new memes
+[*/5 * * * *] 2026-03-20T22:10:45.227Z [DEBUG] Launching browser...
+[*/5 * * * *] 2026-03-20T22:10:45.227Z [WARN] Initial browser launch failed, retrying fresh... {"message":"Invalid URL: /v1/acquire"}
+[*/5 * * * *] 2026-03-20T22:10:45.227Z [ERROR] discoverNewMemes failed {"message":"Invalid URL: /v1/acquire","stack":"TypeError: Invalid URL: /v1/acquire\n    at PuppeteerWorkers.launch (worker.js:13662:32)\n    at discoverNewMemes (worker.js:13738:46)\n    at async Object.scheduled (worker.js:13701:24)"}
+[*/5 * * * *] 2026-03-20T22:10:45.227Z [ERROR] Pipeline failed {"message":"Invalid URL: /v1/acquire","stack":"TypeError: Invalid URL: /v1/acquire\n    at PuppeteerWorkers.launch (worker.js:13662:32)\n    at discoverNewMemes (worker.js:13738:46)\n    at async Object.scheduled (worker.js:13701:24)","cron":"*/5 * * * *","timestamp":"2026-03-20T22:10:48.227Z"}
+
