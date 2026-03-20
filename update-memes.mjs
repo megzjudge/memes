@@ -5,6 +5,7 @@ import process from "node:process";
 const TOP_N = 400; // only used for logging / deciding how many to fetch, not for forcing top-N anymore
 
 const CSV_PATH = path.resolve(process.cwd(), "memes.csv");
+const COOKIE_PATH = path.resolve(process.cwd(), "cookies.txt");
 
 const CSV_HEADERS = [
   "ID",
@@ -123,8 +124,8 @@ async function readExistingCsv() {
     const parsed = parseCSV(text);
     return {
       headers: parsed.headers.length ? parsed.headers : CSV_HEADERS,
-      rows: parsed.rows.map(r => toRowObject(parsed.headers, r)),
-      idSet: new Set(parsed.rows.map(r => String(r[0] ?? "").trim()).filter(Boolean)) // ID is first column
+      rows: parsed.rows.map((r) => toRowObject(parsed.headers, r)),
+      idSet: new Set(parsed.rows.map((r) => String(r[0] ?? "").trim()).filter(Boolean)), // ID is first column
     };
   } catch (e) {
     if (e.code === "ENOENT") {
@@ -158,88 +159,151 @@ async function appendNewRows(headers, newRowObjects) {
   await fs.writeFile(CSV_PATH, finalContent, "utf8");
 }
 
+// ---------------- Auth helpers ----------------
+
+async function loadCookies() {
+  try {
+    return await fs.readFile(COOKIE_PATH, "utf8");
+  } catch {
+    return "";
+  }
+}
+
+async function saveCookies(cookies) {
+  await fs.writeFile(COOKIE_PATH, cookies, "utf8");
+}
+
+function extractCookies(res) {
+  const raw = res.headers.get("set-cookie");
+  if (!raw) return "";
+  return raw.split(",").map((c) => c.split(";")[0]).join("; ");
+}
+
+async function login() {
+  log("Logging in...");
+  const res1 = await fetch("https://imgflip.com/login", {
+    headers: { "User-Agent": "Mozilla/5.0" },
+  });
+  let cookies = extractCookies(res1);
+  const html = await res1.text();
+
+  const tokenMatch = html.match(/name="csrf_token" value="([^"]+)"/);
+  const csrf = tokenMatch?.[1];
+
+  if (!csrf) throw new Error("Failed to extract CSRF token");
+
+  const res2 = await fetch("https://imgflip.com/login", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/x-www-form-urlencoded",
+      "User-Agent": "Mozilla/5.0",
+      "Cookie": cookies,
+    },
+    body: new URLSearchParams({
+      username: process.env.IMGFLIP_USER,
+      password: process.env.IMGFLIP_PASS,
+      csrf_token: csrf,
+    }),
+  });
+
+  const newCookies = extractCookies(res2);
+  const finalCookies = [cookies, newCookies].filter(Boolean).join("; ");
+  await saveCookies(finalCookies);
+  log("Login complete");
+  return finalCookies;
+}
+
+async function fetchWithAuth(url) {
+  let cookieJar = await loadCookies();
+  let res = await fetch(url, { headers: { "User-Agent": "Mozilla/5.0", "Cookie": cookieJar } });
+  let html = await res.text();
+
+  if (html.includes("login") || html.includes("Sign Up")) {
+    log("Session expired → re-authenticating");
+    cookieJar = await login();
+    res = await fetch(url, { headers: { "User-Agent": "Mozilla/5.0", "Cookie": cookieJar } });
+    html = await res.text();
+  }
+
+  return html;
+}
+
+// ---------------- Meme scraping ----------------
+
 function makeBlankRow(item) {
   const { id, imageUrl } = item;
 
-  const isGif = imageUrl.toLowerCase().includes(".gif");
+  const isGif = imageUrl.toLowerCase().endsWith(".gif");
 
   const row = {};
   for (const h of CSV_HEADERS) row[h] = "";
 
   row.ID = id;
-
-  // Use correct page type
   row.URLS = `https://imgflip.com/${isGif ? "gif" : "i"}/${id}`;
-
-  // Use actual scraped media URL (no guessing)
   row.IMAGE_URL = imageUrl;
-
   row.IS_GIF = isGif ? "TRUE" : "FALSE";
   row.TITLE = id; // fallback
 
   return row;
 }
 
-async function fetchLatestMemeIds() {
+async function fetchLatestMemeItems() {
   const url = "https://imgflip.com/all/user-images/mbtininja?sort=latest";
 
   try {
-    const res = await fetch(url, {
-      headers: {
-        'User-Agent':
-          'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36'
-      }
-    });
+    const html = await fetchWithAuth(url);
 
-    if (!res.ok) {
-      throw new Error(`HTTP ${res.status}`);
+    const matches = html.matchAll(
+      /href\s*=\s*["']?\/i\/([a-z0-9]{6,8})["'][^>]*>[\s\S]*?<img[^>]+src=["'](https:\/\/i\.imgflip\.com\/[a-z0-9]+\.(?:jpg|png|gif))["']/gi
+    );
+
+    const items = [];
+    const seen = new Set();
+
+    for (const m of matches) {
+      const id = m[1];
+      const imageUrl = m[2];
+
+      if (!seen.has(id)) {
+        seen.add(id);
+        items.push({ id, imageUrl });
+      }
     }
 
-    const html = await res.text();
-
-    const matches = html.matchAll(/href\s*=\s*["']?\/i\/([a-z0-9]{6,8})["']?/gi);
-    const ids = [...new Set(Array.from(matches, m => m[1]))];
-
-    if (ids.length === 0) {
-      warn("No meme IDs found in HTML.");
+    if (items.length === 0) {
+      warn("No meme items found.");
       process.exit(0);
     }
 
-    log(
-      `Fetched ${ids.length} unique latest IDs (showing first ${TOP_N}): ${ids.slice(0, TOP_N).join(", ")}`
-    );
-    log(
-      "Note: Only safe/public memes are visible in anonymous fetches. NSFW-flagged content is hidden unless logged in with NSFW enabled."
-    );
-
-    return ids;
+    log(`Fetched ${items.length} items (showing first ${TOP_N})`);
+    return items;
   } catch (err) {
-    console.error("Failed to fetch/scrape Imgflip:", err.message || err);
+    console.error("Failed to fetch Imgflip:", err.message || err);
     process.exit(1);
   }
 }
 
+// ---------------- Main ----------------
+
 async function main() {
-  const latestIds = await fetchLatestMemeIds();
+  const latestItems = await fetchLatestMemeItems();
 
   const { headers, rows: existingRows, idSet } = await readExistingCsv();
 
-  // Find IDs that are truly new (not anywhere in the CSV yet)
-  const newIds = latestIds.filter(id => !idSet.has(id));
+  const newItems = latestItems.filter((item) => !idSet.has(item.id));
 
-  if (newIds.length === 0) {
+  if (newItems.length === 0) {
     log("No new memes found → no changes needed.");
     process.exit(0);
   }
 
-  log(`Found ${newIds.length} new meme ID(s): ${newIds.join(", ")}`);
+  log(`Found ${newItems.length} new meme item(s).`);
 
-  const newRows = newIds.map(makeBlankRowForId);
+  const newRows = newItems.map(makeBlankRow);
 
-  // Append them at the top by writing existing content + new rows
   await appendNewRows(headers, newRows);
 
-  log(`Appended ${newIds.length} new row(s) to the top of memes.csv (manual edits preserved).`);
+  log(`Appended ${newRows.length} new row(s) to memes.csv (manual edits preserved).`);
 }
 
 main().catch((e) => {
