@@ -82,7 +82,7 @@ function setupImgflipIcons() {
 // ------------ Meme feed + filters + sort ------------
 
 const STATIC_FILE = "/memes.csv";
-const DAILY_FILE = "/meme_daily_updates.csv";
+const DAILY_FILE = "/meme-views.csv";
 
 let sections = [];
 const currentFilters = { type: "all", meme: "all", keywords: "all" };
