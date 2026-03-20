@@ -64,6 +64,7 @@ export default {
 // ======================
 async function discoverNewMemes(env, user, pass, log) {
   try {
+    log("DEBUG", "Fetching login page...");
     const loginPageRes = await fetch("https://imgflip.com/login", {
       headers: { "User-Agent": "Mozilla/5.0" }
     });
@@ -73,12 +74,15 @@ async function discoverNewMemes(env, user, pass, log) {
       throw new Error(`Login page fetch failed: ${loginPageRes.status} - ${text.slice(0, 300)}`);
     }
 
+    log("DEBUG", "Login page fetched, extracting CSRF token...");
     const loginPageHtml = await loginPageRes.text();
     const csrfMatch = loginPageHtml.match(/name="csrf_token" value="([^"]+)"/);
     const csrf = csrfMatch ? csrfMatch : null;
 
     if (!csrf) throw new Error("CSRF token not found");
+    log("DEBUG", "CSRF token extracted successfully");
 
+    log("DEBUG", "Attempting login...");
     const loginRes = await fetch("https://imgflip.com/login", {
       method: "POST",
       headers: {
@@ -98,6 +102,9 @@ async function discoverNewMemes(env, user, pass, log) {
       throw new Error(`Login failed: ${loginRes.status} - ${errorText.slice(0, 300)}`);
     }
 
+    log("DEBUG", "Login successful");
+
+    log("DEBUG", "Fetching memes page...");
     const memesRes = await fetch("https://imgflip.com/all/user-images/mbtininja?sort=latest", {
       headers: { "User-Agent": "Mozilla/5.0" }
     });
@@ -105,7 +112,9 @@ async function discoverNewMemes(env, user, pass, log) {
     if (!memesRes.ok) throw new Error(`Memes page fetch failed: ${memesRes.status}`);
 
     const html = await memesRes.text();
+    log("DEBUG", `Memes page fetched (${html.length} bytes)`);
 
+    log("DEBUG", "Parsing memes from HTML...");
     const items = [];
     const regexes = [
       /href\s*=\s*["']?\/i\/([a-z0-9]{6,8})["'][^>]*>[\s\S]*?<img[^>]+src=["'](https:\/\/i\.imgflip\.com\/[a-z0-9]+\.(?:jpg|png|gif))["']/gi,
@@ -125,7 +134,12 @@ async function discoverNewMemes(env, user, pass, log) {
       }
     }
 
+    log("DEBUG", `Found ${items.length} total memes on page`);
+
+    log("DEBUG", "Fetching existing memes.csv from GitHub...");
     let existingCsv = await fetchGitHubFile(env, "memes.csv", log);
+    log("DEBUG", `Retrieved ${existingCsv.length} bytes from memes.csv`);
+
     const existingIds = new Set();
     if (existingCsv) {
       const lines = existingCsv.split("\n");
@@ -135,8 +149,9 @@ async function discoverNewMemes(env, user, pass, log) {
       }
     }
 
+    log("DEBUG", `Found ${existingIds.size} existing meme IDs`);
+
     const trulyNew = items.filter(item => !existingIds.has(item.id));
-    
     log("INFO", `Found ${trulyNew.length} truly new memes to add to memes.csv`);
 
     let updatedCsv = existingCsv || "ID,URLS,IMAGE_URL,IS_GIF,TITLE,MEME_TYPE,KYM_SLUG,MBTI_TYPES,KEYWORDS,TAGS\n";
@@ -153,7 +168,10 @@ async function discoverNewMemes(env, user, pass, log) {
       updatedCsv += csvLine(row) + "\n";
     });
 
+    log("DEBUG", `Updated CSV size: ${updatedCsv.length} bytes`);
+    log("DEBUG", "Uploading memes.csv to GitHub...");
     await updateGitHubFile(env, "memes.csv", updatedCsv, log);
+    log("DEBUG", "memes.csv uploaded successfully");
 
     log("INFO", `Added ${trulyNew.length} new rows to memes.csv`);
     return trulyNew;
@@ -168,17 +186,22 @@ async function discoverNewMemes(env, user, pass, log) {
 // ======================
 async function enrichItems(env, newItems, log) {
   try {
+    log("DEBUG", "Fetching memes.csv from GitHub for enrichment...");
     let csvText = await fetchGitHubFile(env, "memes.csv", log);
     let rows = parseCSV(csvText);
+    log("DEBUG", `Parsed ${rows.length} rows from memes.csv`);
 
     const MAX_ROWS_PER_RUN = 34;
     let processed = 0;
     let editedCount = 0;
 
+    log("DEBUG", `Processing up to ${Math.min(newItems.length, MAX_ROWS_PER_RUN)} new items for enrichment...`);
+
     for (const item of newItems.slice(0, MAX_ROWS_PER_RUN)) {
       if (processed >= MAX_ROWS_PER_RUN) break;
 
       const url = `https://imgflip.com/i/${item.id}`;
+      log("DEBUG", `Scraping ${url}...`);
       const { title, imageUrl, tags, kymSlug } = await scrapePage(url);
 
       const row = rows.find(r => r.id === item.id);
@@ -219,6 +242,7 @@ async function enrichItems(env, newItems, log) {
 
         if (changes > 0) {
           editedCount++;
+          log("DEBUG", `Updated ${item.id} with ${changes} changes`);
         }
       }
 
@@ -226,10 +250,15 @@ async function enrichItems(env, newItems, log) {
       await sleep(250);
     }
 
+    log("DEBUG", `Enrichment complete. ${editedCount} rows were edited`);
+
     const updatedCsv = "ID,URLS,IMAGE_URL,IS_GIF,TITLE,MEME_TYPE,KYM_SLUG,MBTI_TYPES,KEYWORDS,TAGS\n" +
       rows.map(r => csvLine([r.id, r.urls, r.image_url, r.is_gif, r.title, r.meme_type, r.kym_slug, r.mbti_types, r.keywords, r.tags])).join("\n");
 
+    log("DEBUG", `Updated CSV size: ${updatedCsv.length} bytes`);
+    log("DEBUG", "Uploading enriched memes.csv to GitHub...");
     await updateGitHubFile(env, "memes.csv", updatedCsv, log);
+    log("DEBUG", "Enriched memes.csv uploaded successfully");
 
     log("INFO", `Edited ${editedCount} rows in memes.csv during enrichment`);
     return editedCount;
@@ -244,8 +273,10 @@ async function enrichItems(env, newItems, log) {
 // ======================
 async function updateViewCounts(env, log) {
   try {
+    log("DEBUG", "Fetching memes.csv from GitHub for view count update...");
     let csvText = await fetchGitHubFile(env, "memes.csv", log);
     let rows = parseCSV(csvText);
+    log("DEBUG", `Parsed ${rows.length} rows from memes.csv`);
 
     const MAX_ITEMS = 350;
     const REQUEST_DELAY_MS = 250;
@@ -253,7 +284,7 @@ async function updateViewCounts(env, log) {
     let updatedCount = 0;
     const results = [];
 
-    // Get existing view data to compare
+    log("DEBUG", "Fetching existing meme-views.csv from GitHub...");
     let existingViewCsv = await fetchGitHubFile(env, "meme-views.csv", log);
     const existingViews = new Map();
     if (existingViewCsv) {
@@ -261,7 +292,10 @@ async function updateViewCounts(env, log) {
       viewRows.forEach(r => {
         if (r.id) existingViews.set(r.id, parseInt(r.views) || 0);
       });
+      log("DEBUG", `Loaded ${existingViews.size} existing view counts`);
     }
+
+    log("DEBUG", `Processing up to ${Math.min(rows.length, MAX_ITEMS)} memes for view count updates...`);
 
     for (const row of rows.slice(0, MAX_ITEMS)) {
       const id = row.id;
@@ -273,25 +307,34 @@ async function updateViewCounts(env, log) {
         blockedCount++;
         const fallback = row.views || 0;
         results.push({ id, views: fallback });
-        if (blockedCount >= 8) break;
+        log("DEBUG", `Blocked on ${id}, using fallback view count: ${fallback}`);
+        if (blockedCount >= 8) {
+          log("WARN", `Reached block limit (${blockedCount}), stopping view count updates`);
+          break;
+        }
       } else {
         results.push({ id, views });
         
-        // Check if this view count is different from existing
         const prevViews = existingViews.get(id) || 0;
         if (views !== prevViews) {
           updatedCount++;
+          log("DEBUG", `View count changed for ${id}: ${prevViews} → ${views}`);
         }
       }
 
       await sleep(REQUEST_DELAY_MS);
     }
 
+    log("DEBUG", `View count updates complete. ${updatedCount} rows had changed view counts`);
+
     const dailyCsv = "ID,URLS,VIEWS\n" + results.map(r =>
       csvLine([r.id, `https://imgflip.com/i/${r.id}`, r.views])
     ).join("\n");
 
+    log("DEBUG", `Updated view CSV size: ${dailyCsv.length} bytes`);
+    log("DEBUG", "Uploading meme-views.csv to GitHub...");
     await updateGitHubFile(env, "meme-views.csv", dailyCsv, log);
+    log("DEBUG", "meme-views.csv uploaded successfully");
 
     log("INFO", `Updated ${updatedCount} rows in meme-views.csv (out of ${results.length} processed)`);
     return updatedCount;
