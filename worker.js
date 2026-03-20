@@ -115,7 +115,7 @@ async function discoverNewMemes(env, user, pass, log) {
       }
     }
 
-    let existingCsv = await env.MEMES_KV.get("memes.csv") || "";
+    let existingCsv = await fetchGitHubFile(env, "memes.csv", log);
     const existingIds = new Set();
     if (existingCsv) {
       const lines = existingCsv.split("\n");
@@ -143,7 +143,6 @@ async function discoverNewMemes(env, user, pass, log) {
       updatedCsv += csvLine(row) + "\n";
     });
 
-    await env.MEMES_KV.put("memes.csv", updatedCsv);
     await updateGitHubFile(env, "memes.csv", updatedCsv, log);
 
     log("INFO", `Added ${trulyNew.length} new rows to memes.csv`);
@@ -159,7 +158,7 @@ async function discoverNewMemes(env, user, pass, log) {
 // ======================
 async function enrichItems(env, newItems, log) {
   try {
-    let csvText = await env.MEMES_KV.get("memes.csv") || "";
+    let csvText = await fetchGitHubFile(env, "memes.csv", log);
     let rows = parseCSV(csvText);
 
     const MAX_ROWS_PER_RUN = 34;
@@ -220,7 +219,6 @@ async function enrichItems(env, newItems, log) {
     const updatedCsv = "ID,URLS,IMAGE_URL,IS_GIF,TITLE,MEME_TYPE,KYM_SLUG,MBTI_TYPES,KEYWORDS,TAGS\n" +
       rows.map(r => csvLine([r.id, r.urls, r.image_url, r.is_gif, r.title, r.meme_type, r.kym_slug, r.mbti_types, r.keywords, r.tags])).join("\n");
 
-    await env.MEMES_KV.put("memes.csv", updatedCsv);
     await updateGitHubFile(env, "memes.csv", updatedCsv, log);
 
     log("INFO", `Edited ${editedCount} rows in memes.csv during enrichment`);
@@ -236,7 +234,7 @@ async function enrichItems(env, newItems, log) {
 // ======================
 async function updateViewCounts(env, log) {
   try {
-    let csvText = await env.MEMES_KV.get("memes.csv") || "";
+    let csvText = await fetchGitHubFile(env, "memes.csv", log);
     let rows = parseCSV(csvText);
 
     const MAX_ITEMS = 350;
@@ -246,7 +244,7 @@ async function updateViewCounts(env, log) {
     const results = [];
 
     // Get existing view data to compare
-    let existingViewCsv = await env.MEMES_KV.get("meme-views.csv") || "";
+    let existingViewCsv = await fetchGitHubFile(env, "meme-views.csv", log);
     const existingViews = new Map();
     if (existingViewCsv) {
       const viewRows = parseCSV(existingViewCsv);
@@ -283,7 +281,6 @@ async function updateViewCounts(env, log) {
       csvLine([r.id, `https://imgflip.com/i/${r.id}`, r.views])
     ).join("\n");
 
-    await env.MEMES_KV.put("meme-views.csv", dailyCsv);
     await updateGitHubFile(env, "meme-views.csv", dailyCsv, log);
 
     log("INFO", `Updated ${updatedCount} rows in meme-views.csv (out of ${results.length} processed)`);
@@ -446,6 +443,43 @@ function toInt(value) {
   if (typeof value === 'number') return value;
   if (typeof value === 'string') return parseInt(value, 10);
   return 0;
+}
+
+async function fetchGitHubFile(env, filename, log) {
+  const owner = env.GITHUB_OWNER;
+  const repo = env.GITHUB_REPO;
+  const token = env.GITHUB_TOKEN;
+
+  if (!owner || !repo || !token) {
+    log("WARN", `GitHub credentials missing, cannot fetch ${filename}`);
+    return "";
+  }
+
+  try {
+    const res = await fetch(
+      `https://api.github.com/repos/${owner}/${repo}/contents/${filename}`,
+      {
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "User-Agent": "Cloudflare-Worker",
+          Accept: "application/vnd.github.v3.raw"
+        }
+      }
+    );
+
+    if (!res.ok) {
+      if (res.status === 404) {
+        log("INFO", `${filename} not found on GitHub, starting fresh`);
+        return "";
+      }
+      throw new Error(`GitHub fetch failed: ${res.status}`);
+    }
+
+    return await res.text();
+  } catch (err) {
+    log("ERROR", `Failed to fetch ${filename} from GitHub`, { message: err.message });
+    return "";
+  }
 }
 
 async function updateGitHubFile(env, filename, content, log) {
