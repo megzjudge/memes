@@ -68,17 +68,31 @@ export default {
 // ======================
 // Step 1: Discover new memes
 // ======================
+
 async function discoverNewMemes(env, user, pass, log) {
   let browser;
   try {
     log("DEBUG", "Launching browser...");
-    browser = await puppeteer.launch(env.MEMES, { keep_alive: false });
+    try {
+      browser = await puppeteer.launch(env.MEMES, { keep_alive: false });
+    } catch (launchErr) {
+      log("WARN", "Initial browser launch failed, retrying fresh...", { message: launchErr.message });
+      await sleep(3000);
+      browser = await puppeteer.launch(env.MEMES, { keep_alive: false });
+    }
 
     const page = await browser.newPage();
     log("DEBUG", "Browser launched, navigating to login page...");
 
     await page.goto("https://imgflip.com/login", { waitUntil: "networkidle0" });
     log("DEBUG", "Login page loaded");
+
+    log("DEBUG", "Checking form fields on login page...");
+    const usernameField = await page.$("#username");
+    const passwordField = await page.$("#password");
+    log("DEBUG", `Username field found: ${!!usernameField}, Password field found: ${!!passwordField}`);
+    const formHtml = await page.$eval("form", el => el.innerHTML).catch(() => "form not found");
+    log("DEBUG", `Login form HTML: ${formHtml.slice(0, 500)}`);
 
     log("DEBUG", "Filling in login form...");
     await page.type("#username", user);
