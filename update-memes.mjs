@@ -2,7 +2,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import process from "node:process";
 
-const TOP_N = 14; // only used for logging / deciding how many to fetch, not for forcing top-N anymore
+const TOP_N = 400; // only used for logging / deciding how many to fetch, not for forcing top-N anymore
 
 const CSV_PATH = path.resolve(process.cwd(), "memes.csv");
 
@@ -158,14 +158,25 @@ async function appendNewRows(headers, newRowObjects) {
   await fs.writeFile(CSV_PATH, finalContent, "utf8");
 }
 
-function makeBlankRowForId(id) {
+function makeBlankRow(item) {
+  const { id, imageUrl } = item;
+
+  const isGif = imageUrl.toLowerCase().includes(".gif");
+
   const row = {};
   for (const h of CSV_HEADERS) row[h] = "";
+
   row.ID = id;
-  row.URLS = `https://imgflip.com/i/${id}`;
-  row.IMAGE_URL = `https://i.imgflip.com/${id}.${KNOWN_GIFS.has(id) ? "gif" : "jpg"}`;
-  row.IS_GIF = KNOWN_GIFS.has(id) ? "TRUE" : "FALSE";
+
+  // Use correct page type
+  row.URLS = `https://imgflip.com/${isGif ? "gif" : "i"}/${id}`;
+
+  // Use actual scraped media URL (no guessing)
+  row.IMAGE_URL = imageUrl;
+
+  row.IS_GIF = isGif ? "TRUE" : "FALSE";
   row.TITLE = id; // fallback
+
   return row;
 }
 
