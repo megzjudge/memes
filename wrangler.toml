@@ -7,7 +7,7 @@ compatibility_flags = ["nodejs_compat"]
 directory = "."
 binding = "ASSETS"
 
-[[browser]]
+[browser]
 binding = "MEMES"
 
 [triggers]
