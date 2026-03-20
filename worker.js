@@ -2,7 +2,6 @@
 
 export default {
   async fetch(request, env) {
-    // Serves static files from root (index.html, script.js, styles.css, images/, etc.)
     return env.ASSETS.fetch(request);
   },
 
@@ -25,15 +24,12 @@ export default {
     }
 
     try {
-      // Step 1: Discover new memes
       log("INFO", "Step 1: Discovering new memes");
       const newItems = await discoverNewMemes(env, user, pass);
 
-      // Step 2: Enrich / fill
       log("INFO", "Step 2: Enriching new items");
       await enrichItems(env, newItems);
 
-      // Step 3: Update views
       log("INFO", "Step 3: Updating view counts");
       await updateViewCounts(env);
 
@@ -50,12 +46,10 @@ export default {
 };
 
 // ======================
-// Step 1: Discover new memes (from update-memes.mjs)
+// Step 1: Discover new memes
 // ======================
 async function discoverNewMemes(env, user, pass) {
   try {
-    log("INFO", "Fetching login page for CSRF");
-
     const loginPageRes = await fetch("https://imgflip.com/login", {
       headers: { "User-Agent": "Mozilla/5.0" }
     });
@@ -69,9 +63,7 @@ async function discoverNewMemes(env, user, pass) {
     const csrfMatch = loginPageHtml.match(/name="csrf_token" value="([^"]+)"/);
     const csrf = csrfMatch ? csrfMatch[1] : null;
 
-    if (!csrf) throw new Error("CSRF token not found in login page");
-
-    log("INFO", "CSRF extracted - attempting login");
+    if (!csrf) throw new Error("CSRF token not found");
 
     const loginRes = await fetch("https://imgflip.com/login", {
       method: "POST",
@@ -92,8 +84,6 @@ async function discoverNewMemes(env, user, pass) {
       throw new Error(`Login failed: ${loginRes.status} - ${errorText.slice(0, 300)}`);
     }
 
-    log("INFO", "Login success - fetching latest memes");
-
     const memesRes = await fetch("https://imgflip.com/all/user-images/mbtininja?sort=latest", {
       headers: { "User-Agent": "Mozilla/5.0" }
     });
@@ -102,7 +92,6 @@ async function discoverNewMemes(env, user, pass) {
 
     const html = await memesRes.text();
 
-    // Regex parsing
     const items = [];
     const regexes = [
       /href\s*=\s*["']?\/i\/([a-z0-9]{6,8})["'][^>]*>[\s\S]*?<img[^>]+src=["'](https:\/\/i\.imgflip\.com\/[a-z0-9]+\.(?:jpg|png|gif))["']/gi,
@@ -122,9 +111,6 @@ async function discoverNewMemes(env, user, pass) {
       }
     }
 
-    log("INFO", "Discovered items", { count: items.length });
-
-    // Filter new ones
     let existingCsv = await env.MEMES_KV.get("memes.csv") || "";
     const existingIds = new Set();
     if (existingCsv) {
@@ -137,7 +123,6 @@ async function discoverNewMemes(env, user, pass) {
 
     const trulyNew = items.filter(item => !existingIds.has(item.id));
 
-    // Append to CSV
     let updatedCsv = existingCsv || "ID,URLS,IMAGE_URL,IS_GIF,TITLE,MEME_TYPE,KYM_SLUG,MBTI_TYPES,KEYWORDS,TAGS\n";
     trulyNew.forEach(item => {
       const isGif = item.imageUrl.toLowerCase().includes(".gif");
@@ -154,8 +139,6 @@ async function discoverNewMemes(env, user, pass) {
 
     await env.MEMES_KV.put("memes.csv", updatedCsv);
 
-    log("INFO", "New items appended to KV", { count: trulyNew.length });
-
     return trulyNew;
   } catch (err) {
     log("ERROR", "discoverNewMemes failed", { message: err.message, stack: err.stack });
@@ -168,8 +151,6 @@ async function discoverNewMemes(env, user, pass) {
 // ======================
 async function enrichItems(env, newItems) {
   try {
-    log("INFO", "Starting enrichment", { count: newItems.length });
-
     let csvText = await env.MEMES_KV.get("memes.csv") || "";
     let rows = parseCSV(csvText);
 
@@ -204,8 +185,6 @@ async function enrichItems(env, newItems) {
       rows.map(r => csvLine([r.id, r.urls, r.image_url, r.is_gif, r.title, r.meme_type, r.kym_slug, r.mbti_types, r.keywords, r.tags])).join("\n");
 
     await env.MEMES_KV.put("memes.csv", updatedCsv);
-
-    log("INFO", "Enrichment complete", { processed });
   } catch (err) {
     log("ERROR", "enrichItems failed", { message: err.message, stack: err.stack });
     throw err;
@@ -217,8 +196,6 @@ async function enrichItems(env, newItems) {
 // ======================
 async function updateViewCounts(env) {
   try {
-    log("INFO", "Starting views update");
-
     let csvText = await env.MEMES_KV.get("memes.csv") || "";
     let rows = parseCSV(csvText);
 
@@ -252,8 +229,6 @@ async function updateViewCounts(env) {
     ).join("\n");
 
     await env.MEMES_KV.put("meme-views.csv", dailyCsv);
-
-    log("INFO", "Views update complete", { updated, blocked: blockedCount });
   } catch (err) {
     log("ERROR", "updateViewCounts failed", { message: err.message, stack: err.stack });
     throw err;
