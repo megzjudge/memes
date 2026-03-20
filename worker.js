@@ -60,7 +60,6 @@ export default {
       });
     }
 
-    // Write all logs to GitHub at the end
     await writeLogsToGitHub(env, logs.join("\n"), log);
   }
 };
@@ -75,6 +74,8 @@ async function discoverNewMemes(env, user, pass, log) {
       headers: { "User-Agent": "Mozilla/5.0" }
     });
 
+    log("DEBUG", `Login page response status: ${loginPageRes.status}`);
+
     if (!loginPageRes.ok) {
       const text = await safeGetText(loginPageRes);
       throw new Error(`Login page fetch failed: ${loginPageRes.status} - ${text.slice(0, 300)}`);
@@ -82,10 +83,15 @@ async function discoverNewMemes(env, user, pass, log) {
 
     log("DEBUG", "Login page fetched, extracting CSRF token...");
     const loginPageHtml = await loginPageRes.text();
+    log("DEBUG", `Login page preview: ${loginPageHtml.slice(0, 500)}`);
+
     const csrfMatch = loginPageHtml.match(/name="csrf_token" value="([^"]+)"/);
     const csrf = csrfMatch ? csrfMatch : null;
 
-    if (!csrf) throw new Error("CSRF token not found");
+    if (!csrf) {
+      log("DEBUG", `Full login page HTML (first 1000 chars): ${loginPageHtml.slice(0, 1000)}`);
+      throw new Error("CSRF token not found");
+    }
     log("DEBUG", "CSRF token extracted successfully");
 
     log("DEBUG", "Attempting login...");
@@ -103,6 +109,8 @@ async function discoverNewMemes(env, user, pass, log) {
       })
     });
 
+    log("DEBUG", `Login response status: ${loginRes.status}`);
+
     if (!loginRes.ok) {
       const errorText = await safeGetText(loginRes);
       throw new Error(`Login failed: ${loginRes.status} - ${errorText.slice(0, 300)}`);
@@ -115,10 +123,13 @@ async function discoverNewMemes(env, user, pass, log) {
       headers: { "User-Agent": "Mozilla/5.0" }
     });
 
+    log("DEBUG", `Memes page response status: ${memesRes.status}`);
+
     if (!memesRes.ok) throw new Error(`Memes page fetch failed: ${memesRes.status}`);
 
     const html = await memesRes.text();
     log("DEBUG", `Memes page fetched (${html.length} bytes)`);
+    log("DEBUG", `Memes page preview: ${html.slice(0, 500)}`);
 
     log("DEBUG", "Parsing memes from HTML...");
     const items = [];
@@ -209,6 +220,7 @@ async function enrichItems(env, newItems, log) {
       const url = `https://imgflip.com/i/${item.id}`;
       log("DEBUG", `Scraping ${url}...`);
       const { title, imageUrl, tags, kymSlug } = await scrapePage(url);
+      log("DEBUG", `Scraped ${item.id}: title="${title}", tags="${tags}", kymSlug="${kymSlug}"`);
 
       const row = rows.find(r => r.id === item.id);
       if (row) {
@@ -249,7 +261,11 @@ async function enrichItems(env, newItems, log) {
         if (changes > 0) {
           editedCount++;
           log("DEBUG", `Updated ${item.id} with ${changes} changes`);
+        } else {
+          log("DEBUG", `No changes for ${item.id}`);
         }
+      } else {
+        log("DEBUG", `Row not found in CSV for ${item.id}`);
       }
 
       processed++;
@@ -391,11 +407,11 @@ function parseCSV(text) {
 }
 
 async function scrapePage(url) {
-  if (!url) return { title: "", imageUrl: "", tags: [], kymSlug: "" };
+  if (!url) return { title: "", imageUrl: "", tags: "", kymSlug: "" };
 
   try {
     const res = await fetch(url, { headers: { "User-Agent": "Mozilla/5.0" } });
-    if (!res.ok) return { title: "", imageUrl: "", tags: [], kymSlug: "" };
+    if (!res.ok) return { title: "", imageUrl: "", tags: "", kymSlug: "" };
 
     const html = await res.text();
 
@@ -413,7 +429,7 @@ async function scrapePage(url) {
 
     return { title, imageUrl, tags, kymSlug };
   } catch {
-    return { title: "", imageUrl: "", tags: [], kymSlug: "" };
+    return { title: "", imageUrl: "", tags: "", kymSlug: "" };
   }
 }
 
@@ -515,6 +531,7 @@ async function fetchGitHubFile(env, filename, log) {
   }
 
   try {
+    log("DEBUG", `Fetching ${filename} from GitHub...`);
     const res = await fetch(
       `https://api.github.com/repos/${owner}/${repo}/contents/${filename}`,
       {
@@ -526,6 +543,8 @@ async function fetchGitHubFile(env, filename, log) {
       }
     );
 
+    log("DEBUG", `GitHub fetch ${filename} response status: ${res.status}`);
+
     if (!res.ok) {
       if (res.status === 404) {
         log("INFO", `${filename} not found on GitHub, starting fresh`);
@@ -534,7 +553,9 @@ async function fetchGitHubFile(env, filename, log) {
       throw new Error(`GitHub fetch failed: ${res.status}`);
     }
 
-    return await res.text();
+    const text = await res.text();
+    log("DEBUG", `Fetched ${filename} successfully (${text.length} bytes)`);
+    return text;
   } catch (err) {
     log("ERROR", `Failed to fetch ${filename} from GitHub`, { message: err.message });
     return "";
@@ -552,7 +573,7 @@ async function updateGitHubFile(env, filename, content, log) {
   }
 
   try {
-    // Get current file SHA (if it exists)
+    log("DEBUG", `Getting SHA for ${filename}...`);
     const getRes = await fetch(
       `https://api.github.com/repos/${owner}/${repo}/contents/${filename}`,
       {
@@ -564,13 +585,18 @@ async function updateGitHubFile(env, filename, content, log) {
       }
     );
 
+    log("DEBUG", `SHA fetch response status: ${getRes.status}`);
+
     let sha = null;
     if (getRes.ok) {
       const fileData = await getRes.json();
       sha = fileData.sha;
+      log("DEBUG", `Got SHA for ${filename}: ${sha}`);
+    } else {
+      log("DEBUG", `No existing SHA for ${filename}, will create new file`);
     }
 
-    // Update or create the file
+    log("DEBUG", `Uploading ${filename} to GitHub (${content.length} bytes)...`);
     const putRes = await fetch(
       `https://api.github.com/repos/${owner}/${repo}/contents/${filename}`,
       {
@@ -588,6 +614,8 @@ async function updateGitHubFile(env, filename, content, log) {
         })
       }
     );
+
+    log("DEBUG", `GitHub PUT response status: ${putRes.status}`);
 
     if (!putRes.ok) {
       const error = await putRes.json();
@@ -613,7 +641,6 @@ async function writeLogsToGitHub(env, logContent, log) {
   }
 
   try {
-    // Get current file SHA (if it exists)
     const getRes = await fetch(
       `https://api.github.com/repos/${owner}/${repo}/contents/${filename}`,
       {
@@ -630,7 +657,6 @@ async function writeLogsToGitHub(env, logContent, log) {
     if (getRes.ok) {
       const fileData = await getRes.json();
       sha = fileData.sha;
-      // Fetch current content
       const currentRes = await fetch(
         `https://api.github.com/repos/${owner}/${repo}/contents/${filename}`,
         {
@@ -644,10 +670,8 @@ async function writeLogsToGitHub(env, logContent, log) {
       fullContent = await currentRes.text();
     }
 
-    // Append new logs
     fullContent += logContent + "\n\n";
 
-    // Update file
     const putRes = await fetch(
       `https://api.github.com/repos/${owner}/${repo}/contents/${filename}`,
       {
@@ -668,6 +692,8 @@ async function writeLogsToGitHub(env, logContent, log) {
 
     if (!putRes.ok) {
       console.error(`Failed to write logs: ${putRes.status}`);
+    } else {
+      console.log("SUCCESS: Logs written to GitHub");
     }
   } catch (err) {
     console.error(`Failed to write logs to GitHub:`, err.message);
@@ -684,3 +710,4 @@ const IMGFLIP_HEADERS = {
 const MBTI_TYPES = ["ESTP","ISTP","ESFP","ISFP","ESTJ","ISTJ","ESFJ","ISFJ","ENFP","INFP","ENFJ","INFJ","ENTJ","INTJ","ENTP","INTP"];
 const MBTI_SET = new Set(MBTI_TYPES);
 const MEME_TYPE_BLOCKLIST = new Set(["memes","mbti","myers briggs","personality"]);
+      
