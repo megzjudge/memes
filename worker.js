@@ -2,7 +2,7 @@
 
 export default {
   async fetch(request, env) {
-    // Serves static files from root or configured directory (index.html, script.js, styles.css, images/, etc.)
+    // Serves static files from root (index.html, script.js, styles.css, images/, etc.)
     return env.ASSETS.fetch(request);
   },
 
@@ -102,7 +102,7 @@ async function discoverNewMemes(env, user, pass) {
 
     const html = await memesRes.text();
 
-    // Regex parsing (from your original update-memes.mjs)
+    // Regex parsing
     const items = [];
     const regexes = [
       /href\s*=\s*["']?\/i\/([a-z0-9]{6,8})["'][^>]*>[\s\S]*?<img[^>]+src=["'](https:\/\/i\.imgflip\.com\/[a-z0-9]+\.(?:jpg|png|gif))["']/gi,
@@ -124,7 +124,7 @@ async function discoverNewMemes(env, user, pass) {
 
     log("INFO", "Discovered items", { count: items.length });
 
-    // Filter new ones (simple ID check from existing CSV in KV)
+    // Filter new ones
     let existingCsv = await env.MEMES_KV.get("memes.csv") || "";
     const existingIds = new Set();
     if (existingCsv) {
@@ -137,12 +137,8 @@ async function discoverNewMemes(env, user, pass) {
 
     const trulyNew = items.filter(item => !existingIds.has(item.id));
 
-    // Append new rows to CSV (basic, no full header check yet)
-    let updatedCsv = existingCsv;
-    if (!updatedCsv) {
-      updatedCsv = "ID,URLS,IMAGE_URL,IS_GIF,TITLE,MEME_TYPE,KYM_SLUG,MBTI_TYPES,KEYWORDS,TAGS\n";
-    }
-
+    // Append to CSV
+    let updatedCsv = existingCsv || "ID,URLS,IMAGE_URL,IS_GIF,TITLE,MEME_TYPE,KYM_SLUG,MBTI_TYPES,KEYWORDS,TAGS\n";
     trulyNew.forEach(item => {
       const isGif = item.imageUrl.toLowerCase().includes(".gif");
       const row = [
@@ -150,7 +146,7 @@ async function discoverNewMemes(env, user, pass) {
         `https://imgflip.com/${isGif ? "gif" : "i"}/${item.id}`,
         item.imageUrl,
         isGif ? "TRUE" : "FALSE",
-        item.id, // title placeholder
+        item.id,
         "", "", "", "", ""
       ];
       updatedCsv += csvLine(row) + "\n";
@@ -162,21 +158,17 @@ async function discoverNewMemes(env, user, pass) {
 
     return trulyNew;
   } catch (err) {
-    log("ERROR", "discoverNewMemes failed", {
-      message: err.message,
-      stack: err.stack,
-      step: "update-memes"
-    });
+    log("ERROR", "discoverNewMemes failed", { message: err.message, stack: err.stack });
     throw err;
   }
 }
 
 // ======================
-// Step 2: Enrich / fill (from update-fill.mjs)
+// Step 2: Enrich / fill
 // ======================
 async function enrichItems(env, newItems) {
   try {
-    log("INFO", "Starting enrichment", { newItemsCount: newItems.length });
+    log("INFO", "Starting enrichment", { count: newItems.length });
 
     let csvText = await env.MEMES_KV.get("memes.csv") || "";
     let rows = parseCSV(csvText);
@@ -188,8 +180,6 @@ async function enrichItems(env, newItems) {
       if (processed >= MAX_ROWS_PER_RUN) break;
 
       const url = `https://imgflip.com/i/${item.id}`;
-      log("INFO", "Scraping for enrichment", { url });
-
       const { title, imageUrl, tags, kymSlug } = await scrapePage(url);
 
       const row = rows.find(r => r.id === item.id);
@@ -210,28 +200,20 @@ async function enrichItems(env, newItems) {
       await sleep(250);
     }
 
-    // Write back enriched CSV
     const updatedCsv = "ID,URLS,IMAGE_URL,IS_GIF,TITLE,MEME_TYPE,KYM_SLUG,MBTI_TYPES,KEYWORDS,TAGS\n" +
-      rows.map(r => csvLine([
-        r.id, r.urls, r.image_url, r.is_gif, r.title, r.meme_type,
-        r.kym_slug, r.mbti_types, r.keywords, r.tags
-      ])).join("\n");
+      rows.map(r => csvLine([r.id, r.urls, r.image_url, r.is_gif, r.title, r.meme_type, r.kym_slug, r.mbti_types, r.keywords, r.tags])).join("\n");
 
     await env.MEMES_KV.put("memes.csv", updatedCsv);
 
     log("INFO", "Enrichment complete", { processed });
   } catch (err) {
-    log("ERROR", "enrichItems failed", {
-      message: err.message,
-      stack: err.stack,
-      step: "update-fill"
-    });
+    log("ERROR", "enrichItems failed", { message: err.message, stack: err.stack });
     throw err;
   }
 }
 
 // ======================
-// Step 3: Update views (from update-views.mjs)
+// Step 3: Update views
 // ======================
 async function updateViewCounts(env) {
   try {
@@ -250,18 +232,13 @@ async function updateViewCounts(env) {
       const id = row.id;
       if (!id) continue;
 
-      const url = row.urls || `https://imgflip.com/i/${id}`;
       const { views, blocked } = await fetchViewsForMeme(id);
 
       if (blocked) {
         blockedCount++;
         const fallback = row.views || 0;
         results.push({ id, views: fallback });
-        log("WARN", "Blocked - using fallback", { id, fallback });
-        if (blockedCount >= 8) {
-          log("WARN", "Stopping early - too many blocks");
-          break;
-        }
+        if (blockedCount >= 8) break;
       } else {
         results.push({ id, views });
         if (views !== (row.views || 0)) updated++;
@@ -270,7 +247,6 @@ async function updateViewCounts(env) {
       await sleep(REQUEST_DELAY_MS);
     }
 
-    // Write daily updates to KV (renamed to meme-views.csv)
     const dailyCsv = "ID,URLS,VIEWS\n" + results.map(r =>
       csvLine([r.id, `https://imgflip.com/i/${r.id}`, r.views])
     ).join("\n");
@@ -279,17 +255,13 @@ async function updateViewCounts(env) {
 
     log("INFO", "Views update complete", { updated, blocked: blockedCount });
   } catch (err) {
-    log("ERROR", "updateViewCounts failed", {
-      message: err.message,
-      stack: err.stack,
-      step: "update-views"
-    });
+    log("ERROR", "updateViewCounts failed", { message: err.message, stack: err.stack });
     throw err;
   }
 }
 
 // ======================
-// Shared helpers (combined from all three scripts)
+// Shared helpers
 // ======================
 
 async function safeGetText(res) {
@@ -350,8 +322,7 @@ async function scrapePage(url) {
     const kymSlug = kymMatch ? kymMatch[1] : "";
 
     return { title, imageUrl, tags, kymSlug };
-  } catch (err) {
-    log("ERROR", "scrapePage failed", { url, message: err.message });
+  } catch {
     return { title: "", imageUrl: "", tags: [], kymSlug: "" };
   }
 }
@@ -390,7 +361,6 @@ async function fetchViewsForMeme(id) {
   const next = extractNextData(html);
   if (next) {
     let candidate = null;
-
     candidate = getDeep(next, ["props", "pageProps", "image", "views"]);
     if (candidate === null) candidate = getDeep(next, ["props", "pageProps", "data", "image", "views"]);
     if (candidate === null) candidate = getDeep(next, ["props", "pageProps", "image", "view_count"]);
@@ -400,11 +370,9 @@ async function fetchViewsForMeme(id) {
     if (Number.isFinite(v)) return { views: v, blocked: false };
   }
 
-  // Fallback 1
   const m1 = html.match(/"views"\s*:\s*(\d{1,12})/);
   if (m1) return { views: Number(m1[1]), blocked: false };
 
-  // Fallback 2
   const m2 = html.match(/([\d,]{1,15})\s+views/i);
   if (m2) return { views: Number(m2[1].replace(/,/g, "")), blocked: false };
 
