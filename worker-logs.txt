@@ -241,3 +241,84 @@ mm=0;
 [*/5 * * * *] 2026-03-20T20:50:50.140Z [ERROR] discoverNewMemes failed {"message":"CSRF token not found in cookies or HTML","stack":"Error: CSRF token not found in cookies or HTML\n    at discoverNewMemes (worker.js:96:15)\n    at async Object.scheduled (worker.js:28:24)"}
 [*/5 * * * *] 2026-03-20T20:50:50.140Z [ERROR] Pipeline failed {"message":"CSRF token not found in cookies or HTML","stack":"Error: CSRF token not found in cookies or HTML\n    at discoverNewMemes (worker.js:96:15)\n    at async Object.scheduled (worker.js:28:24)","cron":"*/5 * * * *","timestamp":"2026-03-20T20:50:50.368Z"}
 
+[*/5 * * * *] 2026-03-20T21:10:40.926Z [INFO] Cron started
+[*/5 * * * *] 2026-03-20T21:10:40.926Z [INFO] Step 1: Discovering new memes
+[*/5 * * * *] 2026-03-20T21:10:40.926Z [DEBUG] Fetching login page to get CSRF cookie...
+[*/5 * * * *] 2026-03-20T21:10:40.926Z [DEBUG] Login page status: 200
+[*/5 * * * *] 2026-03-20T21:10:40.926Z [DEBUG] Set-Cookie header: null
+[*/5 * * * *] 2026-03-20T21:10:40.926Z [DEBUG] Searching HTML for CSRF (length: 8892)...
+[*/5 * * * *] 2026-03-20T21:10:40.926Z [DEBUG] Login page HTML preview: <!DOCTYPE html>
+
+<head>
+
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+
+<script>
+a=new XMLHttpRequest();
+a.onload=function(){I=JSON.parse(this.responseText);if(window.initData)initData();};
+a.open('get','/ajax_get_le_data',true);
+a.send();
+</script>
+
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-DCRTFFEBRL"></script>
+<script>
+	window.dataLayer = window.dataLayer || [];
+
+[*/5 * * * *] 2026-03-20T21:10:40.926Z [DEBUG] Full login HTML (first 2000 chars): <!DOCTYPE html>
+
+<head>
+
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+
+<script>
+a=new XMLHttpRequest();
+a.onload=function(){I=JSON.parse(this.responseText);if(window.initData)initData();};
+a.open('get','/ajax_get_le_data',true);
+a.send();
+</script>
+
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-DCRTFFEBRL"></script>
+<script>
+	window.dataLayer = window.dataLayer || [];
+	function gtag(){dataLayer.push(arguments);}
+	gtag('js', new Date());
+	gtag('config', 'G-DCRTFFEBRL');
+	gtag('set', 'user_properties', {
+		app_type: (typeof window.matchMedia !== 'undefined' && window.matchMedia('(display-mode: standalone)').matches) ? 'standalone' : 'web'
+	});
+	gtag('config', 'G-X8YQQMPY4Q', {send_page_view: false});
+	window._pwGA4PageviewId = ''.concat(Date.now());
+	gtag('event', 'ramp_js', {
+		send_to: 'G-X8YQQMPY4Q',
+		pageview_id: window._pwGA4PageviewId
+	});
+</script>
+<script>
+version=1451;
+spriteNum=5031;
+IMAGE_DOMAIN='//i.imgflip.com/';
+mm=0;
+</script>
+
+<style>
+.i-banner{width:320px;height:50px;display:block;margin:0 auto;overflow:hidden;}
+@media(min-width:500px){.i-banner{width:468px;height:60px;}}
+@media(min-width:760px){.i-banner{width:728px;height:90px;}}
+</style>
+<link rel="icon" href="/favicon.ico?b"/>
+<link rel="icon" sizes="96x96" href="/imgflip-icon-96.png"/>
+<link rel="icon" sizes="180x180" href="/apple-touch-icon.png?c"/>
+<link rel="apple-touch-icon" href="/apple-touch-icon.png?c"/>
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black">
+<meta name="apple-mobile-web-app-title" content="Imgflip">
+<meta name="theme-color" content="#333"/>
+<link rel="manifest" href="/manifest.json">
+<link rel='stylesheet' href='//s.imgflip.com/v1451/style.css' media='screen'/>
+<title>Login - Imgflip</title>
+<meta name="description" content="Imgflip login pa
+[*/5 * * * *] 2026-03-20T21:10:40.926Z [ERROR] discoverNewMemes failed {"message":"CSRF token not found in cookies or HTML","stack":"Error: CSRF token not found in cookies or HTML\n    at discoverNewMemes (worker.js:96:15)\n    at async Object.scheduled (worker.js:28:24)"}
+[*/5 * * * *] 2026-03-20T21:10:40.926Z [ERROR] Pipeline failed {"message":"CSRF token not found in cookies or HTML","stack":"Error: CSRF token not found in cookies or HTML\n    at discoverNewMemes (worker.js:96:15)\n    at async Object.scheduled (worker.js:28:24)","cron":"*/5 * * * *","timestamp":"2026-03-20T21:10:41.120Z"}
+
