@@ -8,9 +8,12 @@ export default {
   async scheduled(event, env, ctx) {
     const cronId = event.cron;
     const startTime = new Date().toISOString();
+    const logs = [];
 
     const log = (level, msg, data = {}) => {
-      console.log(`[${cronId}] ${startTime} [${level}] ${msg}`, data);
+      const logEntry = `[${cronId}] ${startTime} [${level}] ${msg}`;
+      console.log(logEntry, data);
+      logs.push(logEntry + (Object.keys(data).length > 0 ? ` ${JSON.stringify(data)}` : ""));
     };
 
     log("INFO", "Cron started");
@@ -20,23 +23,27 @@ export default {
 
     if (!user || !pass) {
       log("ERROR", "Missing IMGFLIP_USER or IMGFLIP_PASS");
+      await writeLogsToGitHub(env, logs.join("\n"), log);
       return;
     }
 
     try {
       log("INFO", "Step 1: Discovering new memes");
       const newItems = await discoverNewMemes(env, user, pass, log);
+      log("INFO", `✅ Step 1 Complete: ${newItems.length} rows added`);
 
       log("INFO", "Step 2: Enriching new items");
       const editedCount = await enrichItems(env, newItems, log);
+      log("INFO", `✅ Step 2 Complete: ${editedCount} rows edited`);
 
       log("INFO", "Step 3: Updating view counts");
       const updatedViewCount = await updateViewCounts(env, log);
+      log("INFO", `✅ Step 3 Complete: ${updatedViewCount} rows edited`);
 
       log("INFO", "Full pipeline completed successfully", {
         newMemesAdded: newItems.length,
-        rowsEdited: editedCount,
-        viewRowsUpdated: updatedViewCount
+        rowsEditedStep2: editedCount,
+        rowsEditedStep3: updatedViewCount
       });
     } catch (err) {
       log("ERROR", "Pipeline failed", {
@@ -46,6 +53,9 @@ export default {
         timestamp: new Date().toISOString()
       });
     }
+
+    // Write all logs to GitHub at the end
+    await writeLogsToGitHub(env, logs.join("\n"), log);
   }
 };
 
@@ -539,6 +549,79 @@ async function updateGitHubFile(env, filename, content, log) {
     log("INFO", `Successfully synced ${filename} to GitHub`);
   } catch (err) {
     log("ERROR", `Failed to update ${filename} on GitHub`, { message: err.message });
+  }
+}
+
+async function writeLogsToGitHub(env, logContent, log) {
+  const owner = env.GITHUB_OWNER;
+  const repo = env.GITHUB_REPO;
+  const token = env.GITHUB_TOKEN;
+  const filename = "worker-logs.txt";
+
+  if (!owner || !repo || !token) {
+    console.log("WARN: GitHub credentials missing, cannot write logs");
+    return;
+  }
+
+  try {
+    // Get current file SHA (if it exists)
+    const getRes = await fetch(
+      `https://api.github.com/repos/${owner}/${repo}/contents/${filename}`,
+      {
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "User-Agent": "Cloudflare-Worker",
+          Accept: "application/vnd.github+json"
+        }
+      }
+    );
+
+    let sha = null;
+    let fullContent = "";
+    if (getRes.ok) {
+      const fileData = await getRes.json();
+      sha = fileData.sha;
+      // Fetch current content
+      const currentRes = await fetch(
+        `https://api.github.com/repos/${owner}/${repo}/contents/${filename}`,
+        {
+          headers: {
+            Authorization: `Bearer ${token}`,
+            "User-Agent": "Cloudflare-Worker",
+            Accept: "application/vnd.github.v3.raw"
+          }
+        }
+      );
+      fullContent = await currentRes.text();
+    }
+
+    // Append new logs
+    fullContent += logContent + "\n\n";
+
+    // Update file
+    const putRes = await fetch(
+      `https://api.github.com/repos/${owner}/${repo}/contents/${filename}`,
+      {
+        method: "PUT",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+          "User-Agent": "Cloudflare-Worker",
+          Accept: "application/vnd.github+json"
+        },
+        body: JSON.stringify({
+          message: `Add worker logs`,
+          content: btoa(fullContent),
+          sha
+        })
+      }
+    );
+
+    if (!putRes.ok) {
+      console.error(`Failed to write logs: ${putRes.status}`);
+    }
+  } catch (err) {
+    console.error(`Failed to write logs to GitHub:`, err.message);
   }
 }
 
