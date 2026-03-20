@@ -69,29 +69,31 @@ export default {
 // ======================
 async function discoverNewMemes(env, user, pass, log) {
   try {
-    log("DEBUG", "Fetching login page...");
-    const loginPageRes = await fetch("https://imgflip.com/login", {
-      headers: { "User-Agent": "Mozilla/5.0" }
+    log("DEBUG", "Fetching CSRF token from AJAX endpoint...");
+    const ajaxRes = await fetch("https://imgflip.com/ajax_get_le_data", {
+      headers: {
+        "User-Agent": "Mozilla/5.0",
+        "Referer": "https://imgflip.com/login"
+      }
     });
 
-    log("DEBUG", `Login page response status: ${loginPageRes.status}`);
+    log("DEBUG", `AJAX response status: ${ajaxRes.status}`);
 
-    if (!loginPageRes.ok) {
-      const text = await safeGetText(loginPageRes);
-      throw new Error(`Login page fetch failed: ${loginPageRes.status} - ${text.slice(0, 300)}`);
+    if (!ajaxRes.ok) {
+      const text = await safeGetText(ajaxRes);
+      throw new Error(`AJAX endpoint failed: ${ajaxRes.status} - ${text.slice(0, 300)}`);
     }
 
-    log("DEBUG", "Login page fetched, extracting CSRF token...");
-    const loginPageHtml = await loginPageRes.text();
-    log("DEBUG", `Login page preview: ${loginPageHtml.slice(0, 500)}`);
+    const ajaxData = await ajaxRes.json();
+    log("DEBUG", `AJAX data keys: ${Object.keys(ajaxData).join(", ")}`);
 
-    const csrfMatch = loginPageHtml.match(/name="csrf_token" value="([^"]+)"/);
-    const csrf = csrfMatch ? csrfMatch : null;
+    const csrf = ajaxData.csrf_token || ajaxData.csrfToken || ajaxData.token || null;
 
     if (!csrf) {
-      log("DEBUG", `Full login page HTML (first 1000 chars): ${loginPageHtml.slice(0, 1000)}`);
-      throw new Error("CSRF token not found");
+      log("DEBUG", `Full AJAX response: ${JSON.stringify(ajaxData)}`);
+      throw new Error("CSRF token not found in AJAX response");
     }
+
     log("DEBUG", "CSRF token extracted successfully");
 
     log("DEBUG", "Attempting login...");
@@ -100,7 +102,7 @@ async function discoverNewMemes(env, user, pass, log) {
       headers: {
         "Content-Type": "application/x-www-form-urlencoded",
         "User-Agent": "Mozilla/5.0",
-        "Cookie": loginPageRes.headers.get("set-cookie") || ""
+        "Referer": "https://imgflip.com/login"
       },
       body: new URLSearchParams({
         username: user,
@@ -207,7 +209,6 @@ async function enrichItems(env, newItems, log) {
     let csvText = await fetchGitHubFile(env, "memes.csv", log);
     let rows = parseCSV(csvText);
     log("DEBUG", `Parsed ${rows.length} rows from memes.csv`);
-
     const MAX_ROWS_PER_RUN = 34;
     let processed = 0;
     let editedCount = 0;
@@ -225,17 +226,17 @@ async function enrichItems(env, newItems, log) {
       const row = rows.find(r => r.id === item.id);
       if (row) {
         let changes = 0;
-        
-        if (title && title !== row.title) { 
-          row.title = title; 
+
+        if (title && title !== row.title) {
+          row.title = title;
           changes++;
         }
-        if (imageUrl && imageUrl !== row.image_url) { 
-          row.image_url = imageUrl; 
+        if (imageUrl && imageUrl !== row.image_url) {
+          row.image_url = imageUrl;
           changes++;
         }
-        if (kymSlug && kymSlug !== row.kym_slug) { 
-          row.kym_slug = kymSlug; 
+        if (kymSlug && kymSlug !== row.kym_slug) {
+          row.kym_slug = kymSlug;
           changes++;
         }
 
@@ -336,7 +337,7 @@ async function updateViewCounts(env, log) {
         }
       } else {
         results.push({ id, views });
-        
+
         const prevViews = existingViews.get(id) || 0;
         if (views !== prevViews) {
           updatedCount++;
@@ -710,4 +711,3 @@ const IMGFLIP_HEADERS = {
 const MBTI_TYPES = ["ESTP","ISTP","ESFP","ISFP","ESTJ","ISTJ","ESFJ","ISFJ","ENFP","INFP","ENFJ","INFJ","ENTJ","INTJ","ENTP","INTP"];
 const MBTI_SET = new Set(MBTI_TYPES);
 const MEME_TYPE_BLOCKLIST = new Set(["memes","mbti","myers briggs","personality"]);
-      
