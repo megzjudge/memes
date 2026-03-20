@@ -6,12 +6,11 @@ compatibility_date = "2026-03-20"
 directory = "."
 binding = "ASSETS"
 
-# Temporarily commented out to fix deploy
-# [[triggers.crons]]
-# cron = "0 11 * * *"
-# 
-# [[triggers.crons]]
-# cron = "30 11 * * *"
-# 
-# [[triggers.crons]]
-# cron = "0 12 * * *"
+[[triggers.crons]]
+cron = "0 11 * * *"
+
+[[triggers.crons]]
+cron = "30 11 * * *"
+
+[[triggers.crons]]
+cron = "0 12 * * *"
