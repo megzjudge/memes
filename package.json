@@ -3,6 +3,6 @@
   "version": "1.0.0",
   "private": true,
   "dependencies": {
-    "@cloudflare/puppeteer": "0.0.5"
+    "@cloudflare/puppeteer": "0.0.9"
   }
 }
