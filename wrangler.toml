@@ -11,6 +11,8 @@ crons = [
   "*/5 * * * *"
 ]
 
+browser = { binding = "MEMES" }
+
 [observability]
 enabled = false
 head_sampling_rate = 1
