@@ -652,18 +652,19 @@ async function scrapePage(url) {
 
     const html = await res.text();
 
-    const title = html.match(/<title>(.*?)<\/title>/i)?.[1]
+    const title = html.match(/<title>(.*?)<\/title>/i)?.
       ?.replace(" - Imgflip", "")
       .trim() ?? "";
 
-    const imageUrl = html.match(/property="og:image" content="([^"]+)"/i)?.[1] ?? "";
+    const imageUrl = html.match(/property="og:image" content="([^"]+)"/i)?. ?? "";
 
-    const tagMatchesArray = [...html.matchAll(/href='\/(tag|meme)\/([^']+)'/g)];
+    // Fixed: Handle both single and double quotes
+    const tagMatchesArray = [...html.matchAll(/href=['"]\/(?:tag|meme)\/([^'"]+)['"]/g)];
 
-    const tags = tagMatchesArray.map(m => m[2]).join(", ");
-    const tagsWithType = tagMatchesArray.map(m => `${m[1]}:${m[2]}`).join(", ");
+    const tags = tagMatchesArray.map(m => m).join(", ");
+    const tagsWithType = tagMatchesArray.map(m => `tag:${m}`).join(", ");
 
-    const kymSlug = html.match(/knowyourmeme.com\/memes\/([^"\/]+)/i)?.[1] ?? "";
+    const kymSlug = html.match(/knowyourmeme\.com\/memes\/([^"\/]+)/i)?. ?? "";
 
     return { title, imageUrl, tags, tagsWithType, kymSlug };
   } catch (err) {
