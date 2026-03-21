@@ -2,7 +2,6 @@
 import puppeteer from "@cloudflare/puppeteer";
 
 export default {
-  // HTTP handler — serves assets + /run endpoint to manually trigger pipeline
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
     const path = url.pathname;
@@ -16,25 +15,22 @@ export default {
       );
 
       return new Response(
-        "Pipeline triggered — check logs for progress",
+        "Pipeline triggered — check Observability logs for progress",
         { status: 202 }
       );
     }
 
-    // Serve static assets (your original behavior)
     return env.ASSETS.fetch(request);
   },
 
-  // Scheduled cron handler — runs every 30 min
   async scheduled(event, env, ctx) {
     const cronId = event.cron;
     const startTime = new Date().toISOString();
-    const logs = [];
 
     const log = (level, msg, data = {}) => {
       const logEntry = `[${cronId}] ${startTime} [${level}] ${msg}`;
       console.log(logEntry, data);
-      logs.push(logEntry + (Object.keys(data).length > 0 ? ` ${JSON.stringify(data)}` : ""));
+      // No manual logs array or GitHub upload needed — Observability captures everything
     };
 
     log("INFO", "Cron started");
@@ -44,13 +40,11 @@ export default {
 
     if (!user || !pass) {
       log("ERROR", "Missing IMGFLIP_USER or IMGFLIP_PASS");
-      await writeLogsToGitHub(env, logs.join("\n"), log);
       return;
     }
 
     try {
-      // Step 1 disabled
-      const newItems = [];
+      const newItems = []; // Step 1 disabled
 
       log("INFO", "Step 2: Enriching new items");
       const editedCount = await enrichItems(env, newItems, log);
@@ -76,8 +70,6 @@ export default {
         timestamp: new Date().toISOString()
       });
     }
-
-    await writeLogsToGitHub(env, logs.join("\n"), log);
   }
 };
 
@@ -301,11 +293,15 @@ async function enrichItems(env, newItems, log) {
     });
     rows.sort((a, b) => b.id.localeCompare(a.id));
 
-    // Take only the 2 most recent
     const recentRows = rows.slice(0, 2);
+    if (recentRows.length === 0) {
+      log("INFO", "No rows in CSV — nothing to enrich");
+      return 0;
+    }
     log("INFO", `Enriching the 2 most recent memes: ${recentRows.map(r => r.id).join(", ")}`);
 
     let editedCount = 0;
+    let hasChanges = false;
 
     for (const row of recentRows) {
       const item = { id: row.id };
@@ -350,6 +346,7 @@ async function enrichItems(env, newItems, log) {
 
       if (changes > 0) {
         editedCount++;
+        hasChanges = true;
         log("DEBUG", `Updated ${item.id} with ${changes} changes`);
       } else {
         log("DEBUG", `No changes for ${item.id}`);
@@ -358,13 +355,25 @@ async function enrichItems(env, newItems, log) {
       await sleep(250);
     }
 
-    log("DEBUG", `Enrichment complete. ${editedCount} of 2 rows were edited`);
+    if (!hasChanges) {
+      log("INFO", "No actual changes in the last 2 memes — skipping memes.csv upload");
+      return editedCount;
+    }
+
+    // Optional cleanup before rebuild
+    rows.forEach(r => {
+      ['mbti_types', 'keywords', 'tags'].forEach(field => {
+        let val = String(r[field] || "").trim();
+        if (val.startsWith('"') && val.endsWith('"') && !val.includes(',')) {
+          r[field] = val.slice(1, -1).trim();
+        }
+      });
+    });
 
     const updatedCsv = "ID,URLS,IMAGE_URL,IS_GIF,TITLE,MEME_TYPE,KYM_SLUG,MBTI_TYPES,KEYWORDS,TAGS\n" +
       rows.map(r => csvLine([r.id, r.urls, r.image_url, r.is_gif, r.title, r.meme_type, r.kym_slug, r.mbti_types, r.keywords, r.tags])).join("\n");
 
-    log("DEBUG", `Updated CSV size: ${updatedCsv.length} bytes`);
-    log("DEBUG", "Uploading enriched memes.csv to GitHub...");
+    log("DEBUG", `Changes detected — uploading updated CSV (${updatedCsv.length} bytes)`);
     await updateGitHubFile(env, "memes.csv", updatedCsv, log);
     log("DEBUG", "Enriched memes.csv uploaded successfully");
 
@@ -478,8 +487,19 @@ function sleep(ms) {
 }
 
 function csvEscape(value) {
-  const s = String(value ?? "");
-  if (/[",\n\r]/.test(s)) return `"${s.replace(/"/g, '""')}"`;
+  let s = String(value ?? "").trim();
+
+  if (s.startsWith('"') && s.endsWith('"') && s.length >= 2) {
+    const inner = s.slice(1, -1);
+    if (!inner.includes('"') || inner.includes('""')) {
+      return s;
+    }
+  }
+
+  if (/[",\n\r]/.test(s)) {
+    return `"${s.replace(/"/g, '""')}"`;
+  }
+
   return s;
 }
 
@@ -846,77 +866,6 @@ async function updateGitHubFile(env, filename, content, log) {
     log("INFO", `Successfully synced ${filename} to GitHub`);
   } catch (err) {
     log("ERROR", `Failed to update ${filename} on GitHub`, { message: err.message });
-  }
-}
-
-async function writeLogsToGitHub(env, logContent, log) {
-  const owner = env.GITHUB_OWNER;
-  const repo = env.GITHUB_REPO;
-  const token = env.GITHUB_TOKEN;
-  const filename = "worker-logs.txt";
-
-  if (!owner || !repo || !token) {
-    console.log("WARN: GitHub credentials missing, cannot write logs");
-    return;
-  }
-
-  try {
-    const getRes = await fetch(
-      `https://api.github.com/repos/${owner}/${repo}/contents/${filename}`,
-      {
-        headers: {
-          Authorization: `Bearer ${token}`,
-          "User-Agent": "Cloudflare-Worker",
-          Accept: "application/vnd.github+json"
-        }
-      }
-    );
-
-    let sha = null;
-    let fullContent = "";
-    if (getRes.ok) {
-      const fileData = await getRes.json();
-      sha = fileData.sha;
-      const currentRes = await fetch(
-        `https://api.github.com/repos/${owner}/${repo}/contents/${filename}`,
-        {
-          headers: {
-            Authorization: `Bearer ${token}`,
-            "User-Agent": "Cloudflare-Worker",
-            Accept: "application/vnd.github.v3.raw"
-          }
-        }
-      );
-      fullContent = await currentRes.text();
-    }
-
-    fullContent += logContent + "\n\n";
-
-    const putRes = await fetch(
-      `https://api.github.com/repos/${owner}/${repo}/contents/${filename}`,
-      {
-        method: "PUT",
-        headers: {
-          Authorization: `Bearer ${token}`,
-          "Content-Type": "application/json",
-          "User-Agent": "Cloudflare-Worker",
-          Accept: "application/vnd.github+json"
-        },
-        body: JSON.stringify({
-          message: `Add worker logs`,
-          content: utf8ToBase64(fullContent),
-          sha
-        })
-      }
-    );
-
-    if (!putRes.ok) {
-      console.error(`Failed to write logs: ${putRes.status}`);
-    } else {
-      console.log("SUCCESS: Logs written to GitHub");
-    }
-  } catch (err) {
-    console.error(`Failed to write logs to GitHub:`, err.message);
   }
 }
 
