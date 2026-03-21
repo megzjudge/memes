@@ -310,23 +310,23 @@ async function updateViewCounts(env, log) {
     let rows = parseCSV(csvText);
     log("DEBUG", `Parsed ${rows.length} rows from memes.csv`);
 
-    const BATCH_SIZE = 40;                        // safe under 50 subrequests
-    const TOTAL_BATCHES = 13;                     // covers up to 520 memes (40×13)
+    const BATCH_SIZE = 30;                        // 30 memes per batch — safe under 50 subrequests
+    const TOTAL_BATCHES = 17;                     // 17 batches = 510 memes covered
 
-    // Use current minute to pick batch (0–59 → 0–12)
+    // Determine batch from current minute (:00→0, :03→1, ..., :48→16)
     const now = new Date();
     const minute = now.getMinutes();
-    const batchIndex = Math.floor(minute / 5) % TOTAL_BATCHES; // changes every 5 min
+    const batchIndex = Math.floor(minute / 3);    // 0–16 (matches your 17 crons)
 
     const start = batchIndex * BATCH_SIZE;
     const end = Math.min(start + BATCH_SIZE, rows.length);
 
     if (start >= rows.length) {
-      log("INFO", `Batch ${batchIndex + 1}/${TOTAL_BATCHES}: offset past end — nothing to do`);
+      log("INFO", `Triggered at :${minute} — Batch ${batchIndex + 1}/${TOTAL_BATCHES}: offset past end (${start} ≥ ${rows.length}) — nothing to do`);
       return 0;
     }
 
-    log("INFO", `Batch ${batchIndex + 1}/${TOTAL_BATCHES}: processing memes ${start} to ${end-1} (of ${rows.length})`);
+    log("INFO", `Triggered at :${minute} — Batch ${batchIndex + 1}/${TOTAL_BATCHES}: memes ${start} to ${end-1} (of ${rows.length})`);
 
     const REQUEST_DELAY_MS = 250;
     let blockedCount = 0;
@@ -377,7 +377,6 @@ async function updateViewCounts(env, log) {
 
     log("DEBUG", `Batch complete. ${updatedCount} updates this batch`);
 
-    // Only build/upload if we actually processed something
     if (results.length === 0) {
       log("INFO", "No memes processed this batch — skipping upload");
       return updatedCount;
@@ -389,7 +388,7 @@ async function updateViewCounts(env, log) {
 
     log("DEBUG", `Batch CSV size: ${dailyCsv.length} bytes`);
 
-    // Optional: skip upload if no meaningful changes (saves GitHub quota)
+    // Skip upload if no change (saves GitHub quota)
     const currentViewCsv = await fetchGitHubFile(env, "meme-views.csv", log);
     if (dailyCsv.trim() === currentViewCsv.trim()) {
       log("INFO", "No changes in this batch — skipping meme-views.csv upload");
@@ -399,7 +398,7 @@ async function updateViewCounts(env, log) {
       log("DEBUG", "meme-views.csv uploaded successfully");
     }
 
-    log("INFO", `Updated ${updatedCount} rows in this batch (out of ${results.length} processed)`);
+    log("INFO", `Updated ${updatedCount} rows this batch (out of ${results.length} processed)`);
     return updatedCount;
   } catch (err) {
     log("ERROR", "updateViewCounts failed", { message: err.message, stack: err.stack });
