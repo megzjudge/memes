@@ -220,72 +220,69 @@ async function enrichItems(env, newItems, log) {
     let rows = parseCSV(csvText);
     log("DEBUG", `Parsed ${rows.length} rows from memes.csv`);
 
-    const MAX_ROWS_PER_RUN = 34;
-    let processed = 0;
+    // Sort rows by ID descending (assuming higher ID = newer post)
+    rows.sort((a, b) => b.id.localeCompare(a.id));
+
+    // Take only the 2 most recent
+    const recentRows = rows.slice(0, 2);
+    log("INFO", `Enriching the 2 most recent memes: ${recentRows.map(r => r.id).join(", ")}`);
+
     let editedCount = 0;
 
-    log("DEBUG", `Processing up to ${Math.min(newItems.length, MAX_ROWS_PER_RUN)} new items for enrichment...`);
-
-    for (const item of newItems.slice(0, MAX_ROWS_PER_RUN)) {
-      if (processed >= MAX_ROWS_PER_RUN) break;
-
+    for (const row of recentRows) {
+      const item = { id: row.id };  // fake minimal item (we only need the ID)
       const url = `https://imgflip.com/i/${item.id}`;
       log("DEBUG", `Scraping ${url}...`);
       const { title, imageUrl, tags, kymSlug } = await scrapePage(url);
       log("DEBUG", `Scraped ${item.id}: title="${title}", tags="${tags}", kymSlug="${kymSlug}"`);
 
-      const row = rows.find(r => r.id === item.id);
-      if (row) {
-        let changes = 0;
+      let changes = 0;
 
-        if (title && title !== row.title) {
-          row.title = title;
-          changes++;
-        }
-        if (imageUrl && imageUrl !== row.image_url) {
-          row.image_url = imageUrl;
-          changes++;
-        }
-        if (kymSlug && kymSlug !== row.kym_slug) {
-          row.kym_slug = kymSlug;
-          changes++;
-        }
-
-        const { mbti, memeType, keywords } = processTags(tags.split(", "));
-
-        if (mbti.join(", ") !== row.mbti_types) {
-          row.mbti_types = mbti.join(", ");
-          changes++;
-        }
-        if (memeType.replace(/-/g, " ") !== row.meme_type) {
-          row.meme_type = memeType.replace(/-/g, " ");
-          changes++;
-        }
-        if (keywords.join(", ").replace(/-/g, " ") !== row.keywords) {
-          row.keywords = keywords.join(", ").replace(/-/g, " ");
-          changes++;
-        }
-        if (tags.replace(/-/g, " ") !== row.tags) {
-          row.tags = tags.replace(/-/g, " ");
-          changes++;
-        }
-
-        if (changes > 0) {
-          editedCount++;
-          log("DEBUG", `Updated ${item.id} with ${changes} changes`);
-        } else {
-          log("DEBUG", `No changes for ${item.id}`);
-        }
-      } else {
-        log("DEBUG", `Row not found in CSV for ${item.id}`);
+      if (title && title !== row.title) {
+        row.title = title;
+        changes++;
+      }
+      if (imageUrl && imageUrl !== row.image_url) {
+        row.image_url = imageUrl;
+        changes++;
+      }
+      if (kymSlug && kymSlug !== row.kym_slug) {
+        row.kym_slug = kymSlug;
+        changes++;
       }
 
-      processed++;
-      await sleep(250);
+      const { mbti, memeType, keywords } = processTags(tags.split(", "));
+
+      if (mbti.join(", ") !== row.mbti_types) {
+        row.mbti_types = mbti.join(", ");
+        changes++;
+      }
+      if (memeType.replace(/-/g, " ") !== row.meme_type) {
+        row.meme_type = memeType.replace(/-/g, " ");
+        changes++;
+      }
+      if (keywords.join(", ").replace(/-/g, " ") !== row.keywords) {
+        row.keywords = keywords.join(", ").replace(/-/g, " ");
+        changes++;
+      }
+      if (tags.replace(/-/g, " ") !== row.tags) {
+        row.tags = tags.replace(/-/g, " ");
+        changes++;
+      }
+
+      if (changes > 0) {
+        editedCount++;
+        log("DEBUG", `Updated ${item.id} with ${changes} changes`);
+      } else {
+        log("DEBUG", `No changes for ${item.id}`);
+      }
+
+      await sleep(250);  // still polite to Imgflip
     }
 
-    log("DEBUG", `Enrichment complete. ${editedCount} rows were edited`);
+    log("DEBUG", `Enrichment complete. ${editedCount} of 2 rows were edited`);
 
+    // Rebuild CSV with updated rows
     const updatedCsv = "ID,URLS,IMAGE_URL,IS_GIF,TITLE,MEME_TYPE,KYM_SLUG,MBTI_TYPES,KEYWORDS,TAGS\n" +
       rows.map(r => csvLine([r.id, r.urls, r.image_url, r.is_gif, r.title, r.meme_type, r.kym_slug, r.mbti_types, r.keywords, r.tags])).join("\n");
 
@@ -294,7 +291,7 @@ async function enrichItems(env, newItems, log) {
     await updateGitHubFile(env, "memes.csv", updatedCsv, log);
     log("DEBUG", "Enriched memes.csv uploaded successfully");
 
-    log("INFO", `Edited ${editedCount} rows in memes.csv during enrichment`);
+    log("INFO", `Edited ${editedCount} of the last 2 memes`);
     return editedCount;
   } catch (err) {
     log("ERROR", "enrichItems failed", { message: err.message, stack: err.stack });
