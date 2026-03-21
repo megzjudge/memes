@@ -232,7 +232,7 @@ async function enrichItems(env, newItems, log) {
         changes++;
       }
 
-      const { mbti, keywords } = processTags(tags.split(", "));
+      const { mbti, keywords } = processTags(tags.split(", "), memeType);
 
       if (mbti.join(",") !== row.mbti_types) {
         row.mbti_types = mbti.join(",");
@@ -388,7 +388,6 @@ function sleep(ms) {
 function csvEscape(value) {
   let s = String(value ?? "").trim();
 
-  // Clean up old quoting mess
   if (s.startsWith('"') && s.endsWith('"') && s.length >= 2) {
     const inner = s.slice(1, -1);
     if (!inner.includes('"') || inner.includes('""')) {
@@ -398,7 +397,6 @@ function csvEscape(value) {
 
   s = s.replace(/""/g, '"');
 
-  // Quote if field contains comma, quote, newline, or carriage return
   if (/[,\n\r"]/.test(s)) {
     return `"${s.replace(/"/g, '""')}"`;
   }
@@ -414,11 +412,9 @@ function parseCSV(text) {
   if (typeof text !== 'string') return [];
 
   const lines = text.split(/\r?\n/).filter(l => l.trim());
-
   if (lines.length < 1) return [];
 
   const headers = parseLine(lines[0]).map(h => h.trim().toLowerCase());
-
   const rows = [];
 
   for (let i = 1; i < lines.length; i++) {
@@ -426,7 +422,6 @@ function parseCSV(text) {
     if (!line) continue;
 
     const cols = parseLine(line);
-
     const row = {};
     headers.forEach((h, idx) => row[h] = (cols[idx] || "").trim());
     rows.push(row);
@@ -466,6 +461,10 @@ function parseLine(line, delimiter = ",") {
   return result.map(x => x.trim().replace(/^["']|["']$/g, ""));
 }
 
+// -----------------------
+// Scrape + Tag Processing
+// -----------------------
+
 async function scrapePage(url) {
   if (!url) return { title: "", imageUrl: "", tags: "", memeType: "", kymSlug: "" };
 
@@ -488,8 +487,8 @@ async function scrapePage(url) {
       const type = m[1];
       const name = m[2]
         .trim()
-        .replace(/[+-]/g, " ")   // replace BOTH + and - with space
-        .replace(/\s+/g, " ");   // collapse multiple spaces
+        .replace(/[+-]/g, " ")
+        .replace(/\s+/g, " ");
 
       if (type === "meme") {
         memeType = name;
@@ -498,7 +497,6 @@ async function scrapePage(url) {
       }
     });
 
-    // Add "memes" if not present
     if (!tagList.includes("memes") && !memeType.toLowerCase().includes("meme")) {
       tagList.unshift("memes");
     }
@@ -514,25 +512,24 @@ async function scrapePage(url) {
   }
 }
 
-function processTags(tags) {
+function processTags(tags, memeType) {
   const mbti = tags.filter(t => MBTI_SET.has(t.toUpperCase()));
-  let memeType = "";
-  for (const t of tags) {
-    if (!MBTI_SET.has(t.toUpperCase()) && !MEME_TYPE_BLOCKLIST.has(t.toLowerCase())) {
-      memeType = t;
-      break;
-    }
-  }
-  memeType = memeType.replace(/-/g, " ");
-
+  memeType = memeType || "";
   const keywords = tags.filter(t => {
     if (MBTI_SET.has(t.toUpperCase())) return false;
     if (t === memeType) return false;
     return true;
   }).map(k => k.replace(/[+-]/g, " ").replace(/\s+/g, " "));
 
+  // Ensure memeType is included in keywords
+  if (memeType && !keywords.includes(memeType)) keywords.unshift(memeType);
+
   return { mbti, memeType, keywords };
 }
+
+// -----------------------
+// View Count Helpers
+// -----------------------
 
 async function fetchViewsForMeme(id) {
   const url = `https://imgflip.com/i/${id}`;
@@ -547,8 +544,7 @@ async function fetchViewsForMeme(id) {
 
   const next = extractNextData(html);
   if (next) {
-    let candidate = null;
-    candidate = getDeep(next, ["props", "pageProps", "image", "views"]);
+    let candidate = getDeep(next, ["props", "pageProps", "image", "views"]);
     if (candidate === null) candidate = getDeep(next, ["props", "pageProps", "data", "image", "views"]);
     if (candidate === null) candidate = getDeep(next, ["props", "pageProps", "image", "view_count"]);
     if (candidate === null) candidate = getDeep(next, ["props", "pageProps", "data", "image", "view_count"]);
@@ -581,11 +577,7 @@ function getDeep(obj, path) {
 function extractNextData(html) {
   const match = html.match(/<script[^>]+id=["']__NEXT_DATA["'][^>]*>([\s\S]*?)<\/script>/);
   if (!match) return null;
-  try {
-    return JSON.parse(match[1]);
-  } catch {
-    return null;
-  }
+  try { return JSON.parse(match[1]); } catch { return null; }
 }
 
 async function fetchText(url) {
@@ -593,9 +585,7 @@ async function fetchText(url) {
     const res = await fetch(url, { headers: IMGFLIP_HEADERS });
     if (!res.ok) return "";
     return await res.text();
-  } catch {
-    return "";
-  }
+  } catch { return ""; }
 }
 
 function toInt(value) {
@@ -603,6 +593,10 @@ function toInt(value) {
   if (typeof value === 'string') return parseInt(value, 10);
   return 0;
 }
+
+// -----------------------
+// GitHub Helpers
+// -----------------------
 
 async function fetchGitHubFile(env, filename, log) {
   const owner = env.GITHUB_OWNER;
