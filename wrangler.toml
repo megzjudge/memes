@@ -1,6 +1,6 @@
 name = "memes"
 main = "worker.js"
-compatibility_date = "2026-03-20"
+compatibility_date = "2026-03-21"
 compatibility_flags = ["nodejs_compat"]
 
 [assets]
@@ -10,12 +10,39 @@ binding = "ASSETS"
 [browser]
 binding = "MEMES"
 
-[triggers]
-crons = ["*/30 * * * *"]
+# 10 separate crons — each processes one batch (40 memes)
+[[triggers]]
+crons = ["0 * * * *"]   # batch 0 at :00
+
+[[triggers]]
+crons = ["3 * * * *"]   # batch 1 at :03
+
+[[triggers]]
+crons = ["6 * * * *"]   # batch 2 at :06
+
+[[triggers]]
+crons = ["9 * * * *"]   # batch 3 at :09
+
+[[triggers]]
+crons = ["12 * * * *"]  # batch 4 at :12
+
+[[triggers]]
+crons = ["15 * * * *"]  # batch 5 at :15
+
+[[triggers]]
+crons = ["18 * * * *"]  # batch 6 at :18
+
+[[triggers]]
+crons = ["21 * * * *"]  # batch 7 at :21
+
+[[triggers]]
+crons = ["24 * * * *"]  # batch 8 at :24
+
+[[triggers]]
+crons = ["27 * * * *"]  # batch 9 at :27
 
 [observability]
 enabled = false
-head_sampling_rate = 1
 
 [observability.logs]
 enabled = true
