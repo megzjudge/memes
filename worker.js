@@ -2,9 +2,84 @@
 import puppeteer from "@cloudflare/puppeteer";
 
 export default {
-  async fetch(request, env) {
+  // HTTP handler — serves assets + /run endpoint to manually trigger pipeline
+  async fetch(request, env, ctx) {
+    const url = new URL(request.url);
+    const path = url.pathname;
+
+    if (path === "/run" || path === "/trigger") {
+      ctx.waitUntil(
+        (async () => {
+          const fakeEvent = { cron: "manual-http-trigger" };
+          await this.scheduled(fakeEvent, env, ctx);
+        })()
+      );
+
+      return new Response(
+        "Pipeline triggered — check logs for progress",
+        { status: 202 }
+      );
+    }
+
+    // Serve static assets (your original behavior)
     return env.ASSETS.fetch(request);
   },
+
+  // Scheduled cron handler — runs every 30 min
+  async scheduled(event, env, ctx) {
+    const cronId = event.cron;
+    const startTime = new Date().toISOString();
+    const logs = [];
+
+    const log = (level, msg, data = {}) => {
+      const logEntry = `[${cronId}] ${startTime} [${level}] ${msg}`;
+      console.log(logEntry, data);
+      logs.push(logEntry + (Object.keys(data).length > 0 ? ` ${JSON.stringify(data)}` : ""));
+    };
+
+    log("INFO", "Cron started");
+
+    const user = env.IMGFLIP_USER;
+    const pass = env.IMGFLIP_PASS;
+
+    if (!user || !pass) {
+      log("ERROR", "Missing IMGFLIP_USER or IMGFLIP_PASS");
+      await writeLogsToGitHub(env, logs.join("\n"), log);
+      return;
+    }
+
+    try {
+      // Step 1 disabled
+      const newItems = [];
+
+      log("INFO", "Step 2: Enriching new items");
+      const editedCount = await enrichItems(env, newItems, log);
+      log("INFO", `✅ Step 2 Complete: ${editedCount} rows edited`);
+
+      log("INFO", "Waiting 10 seconds before Step 3...");
+      await sleep(10000);
+
+      log("INFO", "Step 3: Updating view counts");
+      const updatedViewCount = await updateViewCounts(env, log);
+      log("INFO", `✅ Step 3 Complete: ${updatedViewCount} rows edited`);
+
+      log("INFO", "Full pipeline completed successfully", {
+        newMemesAdded: 0,
+        rowsEditedStep2: editedCount,
+        rowsEditedStep3: updatedViewCount
+      });
+    } catch (err) {
+      log("ERROR", "Pipeline failed", {
+        message: err.message,
+        stack: err.stack || "No stack",
+        cron: cronId,
+        timestamp: new Date().toISOString()
+      });
+    }
+
+    await writeLogsToGitHub(env, logs.join("\n"), log);
+  }
+};
 
 async scheduled(event, env, ctx) {
     const cronId = event.cron;
@@ -220,7 +295,10 @@ async function enrichItems(env, newItems, log) {
     let rows = parseCSV(csvText);
     log("DEBUG", `Parsed ${rows.length} rows from memes.csv`);
 
-    // Sort rows by ID descending (assuming higher ID = newer post)
+    // Clean IDs and sort newest first (higher ID = newer)
+    rows.forEach(r => {
+      r.id = String(r.id || "").trim().replace(/^["']|["']$/g, "");
+    });
     rows.sort((a, b) => b.id.localeCompare(a.id));
 
     // Take only the 2 most recent
@@ -230,7 +308,7 @@ async function enrichItems(env, newItems, log) {
     let editedCount = 0;
 
     for (const row of recentRows) {
-      const item = { id: row.id };  // fake minimal item (we only need the ID)
+      const item = { id: row.id };
       const url = `https://imgflip.com/i/${item.id}`;
       log("DEBUG", `Scraping ${url}...`);
       const { title, imageUrl, tags, kymSlug } = await scrapePage(url);
@@ -277,12 +355,11 @@ async function enrichItems(env, newItems, log) {
         log("DEBUG", `No changes for ${item.id}`);
       }
 
-      await sleep(250);  // still polite to Imgflip
+      await sleep(250);
     }
 
     log("DEBUG", `Enrichment complete. ${editedCount} of 2 rows were edited`);
 
-    // Rebuild CSV with updated rows
     const updatedCsv = "ID,URLS,IMAGE_URL,IS_GIF,TITLE,MEME_TYPE,KYM_SLUG,MBTI_TYPES,KEYWORDS,TAGS\n" +
       rows.map(r => csvLine([r.id, r.urls, r.image_url, r.is_gif, r.title, r.meme_type, r.kym_slug, r.mbti_types, r.keywords, r.tags])).join("\n");
 
@@ -310,23 +387,12 @@ async function updateViewCounts(env, log) {
     let rows = parseCSV(csvText);
     log("DEBUG", `Parsed ${rows.length} rows from memes.csv`);
 
-    const BATCH_SIZE = 30;                        // 30 memes per batch — safe under 50 subrequests
-    const TOTAL_BATCHES = 17;                     // 17 batches = 510 memes covered
+    // Clean IDs (just in case)
+    rows.forEach(r => {
+      r.id = String(r.id || "").trim().replace(/^["']|["']$/g, "");
+    });
 
-    // Determine batch from current minute (:00→0, :03→1, ..., :48→16)
-    const now = new Date();
-    const minute = now.getMinutes();
-    const batchIndex = Math.floor(minute / 3);    // 0–16 (matches your 17 crons)
-
-    const start = batchIndex * BATCH_SIZE;
-    const end = Math.min(start + BATCH_SIZE, rows.length);
-
-    if (start >= rows.length) {
-      log("INFO", `Triggered at :${minute} — Batch ${batchIndex + 1}/${TOTAL_BATCHES}: offset past end (${start} ≥ ${rows.length}) — nothing to do`);
-      return 0;
-    }
-
-    log("INFO", `Triggered at :${minute} — Batch ${batchIndex + 1}/${TOTAL_BATCHES}: memes ${start} to ${end-1} (of ${rows.length})`);
+    log("INFO", `Processing ALL ${rows.length} memes for view count updates...`);
 
     const REQUEST_DELAY_MS = 250;
     let blockedCount = 0;
@@ -344,9 +410,7 @@ async function updateViewCounts(env, log) {
       log("DEBUG", `Loaded ${existingViews.size} existing view counts`);
     }
 
-    const batchRows = rows.slice(start, end);
-
-    for (const row of batchRows) {
+    for (const row of rows) {
       const id = row.id;
       if (!id) continue;
 
@@ -358,10 +422,10 @@ async function updateViewCounts(env, log) {
         results.push({ id, views: fallback });
         log("DEBUG", `Blocked on ${id}, using fallback: ${fallback}`);
         if (blockedCount >= 8) {
-          log("WARN", `Block limit reached (${blockedCount}), stopping batch`);
+          log("WARN", `Block limit reached (${blockedCount}), stopping`);
           break;
         }
-        await sleep(1500);  // longer cooldown after block
+        await sleep(1500);
       } else {
         results.push({ id, views });
 
@@ -375,10 +439,10 @@ async function updateViewCounts(env, log) {
       await sleep(REQUEST_DELAY_MS);
     }
 
-    log("DEBUG", `Batch complete. ${updatedCount} updates this batch`);
+    log("DEBUG", `Full pass complete. ${updatedCount} updates`);
 
     if (results.length === 0) {
-      log("INFO", "No memes processed this batch — skipping upload");
+      log("INFO", "No memes processed — skipping upload");
       return updatedCount;
     }
 
@@ -386,19 +450,14 @@ async function updateViewCounts(env, log) {
       csvLine([r.id, `https://imgflip.com/i/${r.id}`, r.views])
     ).join("\n");
 
-    log("DEBUG", `Batch CSV size: ${dailyCsv.length} bytes`);
-
-    // Skip upload if no change (saves GitHub quota)
     const currentViewCsv = await fetchGitHubFile(env, "meme-views.csv", log);
     if (dailyCsv.trim() === currentViewCsv.trim()) {
-      log("INFO", "No changes in this batch — skipping meme-views.csv upload");
+      log("INFO", "No changes — skipping meme-views.csv upload");
     } else {
-      log("DEBUG", "Uploading meme-views.csv to GitHub...");
       await updateGitHubFile(env, "meme-views.csv", dailyCsv, log);
-      log("DEBUG", "meme-views.csv uploaded successfully");
     }
 
-    log("INFO", `Updated ${updatedCount} rows this batch (out of ${results.length} processed)`);
+    log("INFO", `Updated ${updatedCount} rows (out of ${results.length} processed)`);
     return updatedCount;
   } catch (err) {
     log("ERROR", "updateViewCounts failed", { message: err.message, stack: err.stack });
@@ -469,33 +528,62 @@ function parseCSV(text) {
     return [];
   }
 
-  const lines = text.split(/\r?\n/)
-    .map(l => l.trim())
-    .filter(Boolean);
+  const lines = text.split(/\r?\n/).filter(l => l.trim() !== "");
 
   if (lines.length < 1) return [];
 
-  // Parse headers (first line only)
-  const headers = splitCsvLine(lines, ',')
-    .map(h => h.trim().toLowerCase());
+  // Headers from first line
+  const headers = parseLine(lines[0]).map(h => h.trim().toLowerCase());
 
   const rows = [];
 
   for (let i = 1; i < lines.length; i++) {
-    if (!lines[i].trim()) continue;
+    const line = lines[i].trim();
+    if (!line) continue;
 
-    // Use quote-aware split
-    const cols = splitCsvLine(lines[i], ',');
+    const cols = parseLine(line);
 
     const row = {};
     headers.forEach((h, idx) => {
-      row[h] = cols[idx] || "";
+      row[h] = (cols[idx] || "").trim();
     });
 
     rows.push(row);
   }
 
   return rows;
+}
+
+// Quote-aware CSV line parser
+function parseLine(line, delimiter = ",") {
+  const result = [];
+  let current = "";
+  let inQuotes = false;
+
+  for (let i = 0; i < line.length; i++) {
+    const char = line[i];
+
+    if (char === '"') {
+      if (inQuotes && line[i + 1] === '"') {
+        current += '"';
+        i++; // skip escaped quote
+      } else {
+        inQuotes = !inQuotes;
+      }
+      continue;
+    }
+
+    if (char === delimiter && !inQuotes) {
+      result.push(current);
+      current = "";
+      continue;
+    }
+
+    current += char;
+  }
+
+  result.push(current);
+  return result;
 }
 
 // Quote-aware CSV line splitter
