@@ -198,6 +198,14 @@ async function discoverNewMemes(env, user, pass, log) {
 // ======================
 // Step 2: Enrich / fill
 // ======================
+
+let csvText = await fetchGitHubFile(env, "memes.csv", log);
+if (typeof csvText !== 'string') {
+  log("ERROR", "fetchGitHubFile did not return a string", { type: typeof csvText });
+  return 0;
+}
+let rows = parseCSV(csvText);
+
 async function enrichItems(env, newItems, log) {
   try {
     log("DEBUG", "Fetching memes.csv from GitHub for enrichment...");
