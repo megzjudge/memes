@@ -3,44 +3,70 @@ main = "worker.js"
 compatibility_date = "2026-03-21"
 compatibility_flags = ["nodejs_compat"]
 
+# Static assets binding (if you're serving anything)
 [assets]
 directory = "."
 binding = "ASSETS"
 
+# Browser / Puppeteer binding for Step 1 (when enabled)
 [browser]
 binding = "MEMES"
 
-# 10 separate crons — each processes one batch (40 memes)
+# 17 staggered cron triggers — each processes one batch of 30 memes
+# Runs every hour from :00 to :48 (every 3 minutes)
+# Covers ~510 memes per hour (17 batches × 30)
 [[triggers]]
-crons = ["0 * * * *"]   # batch 0 at :00
+crons = ["0 * * * *"]   # Batch 0 — memes 0–29 at :00
 
 [[triggers]]
-crons = ["3 * * * *"]   # batch 1 at :03
+crons = ["3 * * * *"]   # Batch 1 — 30–59 at :03
 
 [[triggers]]
-crons = ["6 * * * *"]   # batch 2 at :06
+crons = ["6 * * * *"]   # Batch 2 — 60–89 at :06
 
 [[triggers]]
-crons = ["9 * * * *"]   # batch 3 at :09
+crons = ["9 * * * *"]   # Batch 3 — 90–119 at :09
 
 [[triggers]]
-crons = ["12 * * * *"]  # batch 4 at :12
+crons = ["12 * * * *"]  # Batch 4 — 120–149 at :12
 
 [[triggers]]
-crons = ["15 * * * *"]  # batch 5 at :15
+crons = ["15 * * * *"]  # Batch 5 — 150–179 at :15
 
 [[triggers]]
-crons = ["18 * * * *"]  # batch 6 at :18
+crons = ["18 * * * *"]  # Batch 6 — 180–209 at :18
 
 [[triggers]]
-crons = ["21 * * * *"]  # batch 7 at :21
+crons = ["21 * * * *"]  # Batch 7 — 210–239 at :21
 
 [[triggers]]
-crons = ["24 * * * *"]  # batch 8 at :24
+crons = ["24 * * * *"]  # Batch 8 — 240–269 at :24
 
 [[triggers]]
-crons = ["27 * * * *"]  # batch 9 at :27
+crons = ["27 * * * *"]  # Batch 9 — 270–299 at :27
 
+[[triggers]]
+crons = ["30 * * * *"]  # Batch 10 — 300–329 at :30
+
+[[triggers]]
+crons = ["33 * * * *"]  # Batch 11 — 330–359 at :33
+
+[[triggers]]
+crons = ["36 * * * *"]  # Batch 12 — 360–389 at :36
+
+[[triggers]]
+crons = ["39 * * * *"]  # Batch 13 — 390–419 at :39
+
+[[triggers]]
+crons = ["42 * * * *"]  # Batch 14 — 420–449 at :42
+
+[[triggers]]
+crons = ["45 * * * *"]  # Batch 15 — 450–479 at :45
+
+[[triggers]]
+crons = ["48 * * * *"]  # Batch 16 — 480–509 at :48
+
+# Observability / Logging (your current settings)
 [observability]
 enabled = false
 
@@ -54,3 +80,7 @@ invocation_logs = true
 enabled = false
 persist = true
 head_sampling_rate = 1
+
+# Uncomment when you go Paid Workers ($5/mo) to remove batching
+# [limits]
+# subrequests = 1000
