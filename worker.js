@@ -65,6 +65,10 @@ async scheduled(event, env, ctx) {
   }
 };
 
+function utf8ToBase64(str) {
+  return btoa(unescape(encodeURIComponent(str)));
+}
+
 // ======================
 // Step 1: Discover new memes
 // ======================
@@ -503,7 +507,10 @@ async function fetchViewsForMeme(id) {
   if (m1) return { views: Number(m1), blocked: false };
 
   const m2 = html.match(/([\d,]{1,15})\s+views/i);
-  if (m2) return { views: Number(m2.replace(/,/g, "")), blocked: false };
+  if (m2 && m2[1]) {  // m2[1] is the captured group (the number with commas)
+    const cleanViews = m2[1].replace(/,/g, "");
+    return { views: Number(cleanViews), blocked: false };
+  }
 
   return { views: 0, blocked: false };
 }
@@ -707,7 +714,7 @@ async function writeLogsToGitHub(env, logContent, log) {
         },
         body: JSON.stringify({
           message: `Add worker logs`,
-          content: btoa(fullContent),
+          content: utf8ToBase64(fullContent),
           sha
         })
       }
