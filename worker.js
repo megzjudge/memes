@@ -287,7 +287,6 @@ async function enrichItems(env, newItems, log) {
     let rows = parseCSV(csvText);
     log("DEBUG", `Parsed ${rows.length} rows from memes.csv`);
 
-    // Clean IDs and sort newest first
     rows.forEach(r => {
       r.id = String(r.id || "").trim().replace(/^["']|["']$/g, "");
     });
@@ -307,8 +306,8 @@ async function enrichItems(env, newItems, log) {
       const item = { id: row.id };
       const url = `https://imgflip.com/i/${item.id}`;
       log("DEBUG", `Scraping ${url}...`);
-      const { title, imageUrl, tags, kymSlug } = await scrapePage(url);
-      log("DEBUG", `Scraped ${item.id}: title="${title}", tags="${tags}", kymSlug="${kymSlug}"`);
+      const { title, imageUrl, tags } = await scrapePage(url);
+      log("DEBUG", `Scraped ${item.id}: title="${title}", tags="${tags}"`);
 
       let changes = 0;
 
@@ -320,27 +319,30 @@ async function enrichItems(env, newItems, log) {
         row.image_url = imageUrl;
         changes++;
       }
-      if (kymSlug && kymSlug !== row.kym_slug) {
-        row.kym_slug = kymSlug;
-        changes++;
-      }
 
-      const { mbti, memeType, keywords } = processTags(tags.split(", "));
+      // Process tags into arrays with commas
+      const tagsArray = tags.split(", ").filter(t => t.trim());
+      const { mbti, memeType, keywords } = processTags(tagsArray);
 
-      if (mbti.join(", ") !== row.mbti_types) {
-        row.mbti_types = mbti.join(", ");
+      // Store as comma-separated strings
+      const mbtiStr = mbti.join(", ");
+      const keywordsStr = keywords.join(", ");
+      const tagsStr = tagsArray.join(", ");
+
+      if (memeType && memeType !== row.meme_type) {
+        row.meme_type = memeType;
         changes++;
       }
-      if (memeType.replace(/-/g, " ") !== row.meme_type) {
-        row.meme_type = memeType.replace(/-/g, " ");
+      if (mbtiStr && mbtiStr !== row.mbti_types) {
+        row.mbti_types = mbtiStr;
         changes++;
       }
-      if (keywords.join(", ").replace(/-/g, " ") !== row.keywords) {
-        row.keywords = keywords.join(", ").replace(/-/g, " ");
+      if (keywordsStr && keywordsStr !== row.keywords) {
+        row.keywords = keywordsStr;
         changes++;
       }
-      if (tags.replace(/-/g, " ") !== row.tags) {
-        row.tags = tags.replace(/-/g, " ");
+      if (tagsStr && tagsStr !== row.tags) {
+        row.tags = tagsStr;
         changes++;
       }
 
@@ -348,8 +350,6 @@ async function enrichItems(env, newItems, log) {
         editedCount++;
         hasChanges = true;
         log("DEBUG", `Updated ${item.id} with ${changes} changes`);
-      } else {
-        log("DEBUG", `No changes for ${item.id}`);
       }
 
       await sleep(250);
@@ -360,19 +360,19 @@ async function enrichItems(env, newItems, log) {
       return editedCount;
     }
 
-    // Cleanup before rebuild
-    rows.forEach(r => {
-      ['mbti_types', 'keywords', 'tags'].forEach(field => {
-        let val = String(r[field] || "").trim();
-        if (val.startsWith('"') && val.endsWith('"') && !val.includes(',')) {
-          r[field] = val.slice(1, -1).trim();
-        }
-        r[field] = r[field].replace(/""/g, '"'); // fix double-escaped quotes
-      });
-    });
-
     const updatedCsv = "ID,URLS,IMAGE_URL,IS_GIF,TITLE,MEME_TYPE,KYM_SLUG,MBTI_TYPES,KEYWORDS,TAGS\n" +
-      rows.map(r => csvLine([r.id, r.urls, r.image_url, r.is_gif, r.title, r.meme_type, r.kym_slug, r.mbti_types, r.keywords, r.tags])).join("\n");
+      rows.map(r => csvLine([
+        r.id,
+        r.urls,
+        r.image_url,
+        r.is_gif,
+        r.title,
+        r.meme_type,
+        r.kym_slug,
+        r.mbti_types,
+        r.keywords,
+        r.tags
+      ])).join("\n");
 
     log("DEBUG", `Changes detected — uploading updated CSV (${updatedCsv.length} bytes)`);
     await updateGitHubFile(env, "memes.csv", updatedCsv, log);
