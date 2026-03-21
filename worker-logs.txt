@@ -681,3 +681,12 @@ mm=0;
 [*/5 * * * *] 2026-03-21T05:25:16.823Z [ERROR] enrichItems failed {"message":"lines.split is not a function","stack":"TypeError: lines.split is not a function\n    at parseCSV (worker.js:16503:25)\n    at enrichItems (worker.js:16355:16)\n    at async Object.scheduled (worker.js:16328:27)"}
 [*/5 * * * *] 2026-03-21T05:25:16.823Z [ERROR] Pipeline failed {"message":"lines.split is not a function","stack":"TypeError: lines.split is not a function\n    at parseCSV (worker.js:16503:25)\n    at enrichItems (worker.js:16355:16)\n    at async Object.scheduled (worker.js:16328:27)","cron":"*/5 * * * *","timestamp":"2026-03-21T05:25:17.311Z"}
 
+[*/5 * * * *] 2026-03-21T05:30:17.808Z [INFO] Cron started
+[*/5 * * * *] 2026-03-21T05:30:17.808Z [INFO] Step 2: Enriching new items
+[*/5 * * * *] 2026-03-21T05:30:17.808Z [DEBUG] Fetching memes.csv from GitHub for enrichment...
+[*/5 * * * *] 2026-03-21T05:30:17.808Z [DEBUG] Fetching memes.csv from GitHub...
+[*/5 * * * *] 2026-03-21T05:30:17.808Z [DEBUG] GitHub fetch memes.csv response status: 200
+[*/5 * * * *] 2026-03-21T05:30:17.808Z [DEBUG] Fetched memes.csv successfully (78600 bytes)
+[*/5 * * * *] 2026-03-21T05:30:17.808Z [ERROR] enrichItems failed {"message":"lines.split is not a function","stack":"TypeError: lines.split is not a function\n    at parseCSV (worker.js:16503:25)\n    at enrichItems (worker.js:16355:16)\n    at async Object.scheduled (worker.js:16328:27)"}
+[*/5 * * * *] 2026-03-21T05:30:17.808Z [ERROR] Pipeline failed {"message":"lines.split is not a function","stack":"TypeError: lines.split is not a function\n    at parseCSV (worker.js:16503:25)\n    at enrichItems (worker.js:16355:16)\n    at async Object.scheduled (worker.js:16328:27)","cron":"*/5 * * * *","timestamp":"2026-03-21T05:30:18.186Z"}
+
