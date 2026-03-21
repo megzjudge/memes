@@ -207,7 +207,7 @@ async function enrichItems(env, newItems, log) {
       const item = { id: row.id };
       const url = `https://imgflip.com/i/${item.id}`;
       log("DEBUG", `Scraping ${url}...`);
-      const { title, imageUrl, tags, kymSlug } = await scrapePage(url);
+      const { title, imageUrl, tags, memeType, kymSlug } = await scrapePage(url);
 
       let changes = 0;
 
@@ -223,23 +223,23 @@ async function enrichItems(env, newItems, log) {
         row.kym_slug = kymSlug;
         changes++;
       }
+      if (memeType && memeType !== row.meme_type) {
+        row.meme_type = memeType;
+        changes++;
+      }
+      if (tags && tags !== row.tags) {
+        row.tags = tags;
+        changes++;
+      }
 
-      const { mbti, memeType, keywords } = processTags(tags.split(", "));
+      const { mbti, keywords } = processTags(tags.split(", "));
 
       if (mbti.join(",") !== row.mbti_types) {
         row.mbti_types = mbti.join(",");
         changes++;
       }
-      if (memeType.replace(/-/g, " ") !== row.meme_type) {
-        row.meme_type = memeType.replace(/-/g, " ");
-        changes++;
-      }
       if (keywords.join(",").replace(/-/g, " ") !== row.keywords) {
         row.keywords = keywords.join(",").replace(/-/g, " ");
-        changes++;
-      }
-      if (tags.replace(/-/g, " ") !== row.tags) {
-        row.tags = tags.replace(/-/g, " ");
         changes++;
       }
 
@@ -388,19 +388,18 @@ function sleep(ms) {
 function csvEscape(value) {
   let s = String(value ?? "").trim();
 
-  // Strip outer quotes from lists
-  if (s.startsWith('"') && s.endsWith('"') && s.includes(',')) {
-    s = s.slice(1, -1).trim();
+  // Clean up old quoting mess
+  if (s.startsWith('"') && s.endsWith('"') && s.length >= 2) {
+    const inner = s.slice(1, -1);
+    if (!inner.includes('"') || inner.includes('""')) {
+      s = inner.trim();
+    }
   }
 
   s = s.replace(/""/g, '"');
 
-  // No quoting for comma lists without inner quotes/newlines
-  if (s.includes(',') && !s.includes('"') && !s.includes('\n') && !s.includes('\r')) {
-    return s;
-  }
-
-  if (/[",\n\r]/.test(s)) {
+  // Quote if field contains comma, quote, newline, or carriage return
+  if (/[,\n\r"]/.test(s)) {
     return `"${s.replace(/"/g, '""')}"`;
   }
 
@@ -468,11 +467,11 @@ function parseLine(line, delimiter = ",") {
 }
 
 async function scrapePage(url) {
-  if (!url) return { title: "", imageUrl: "", tags: "", tagsWithType: "", kymSlug: "" };
+  if (!url) return { title: "", imageUrl: "", tags: "", memeType: "", kymSlug: "" };
 
   try {
     const res = await fetch(url, { headers: { "User-Agent": "Mozilla/5.0" } });
-    if (!res.ok) return { title: "", imageUrl: "", tags: "", tagsWithType: "", kymSlug: "" };
+    if (!res.ok) return { title: "", imageUrl: "", tags: "", memeType: "", kymSlug: "" };
 
     const html = await res.text();
 
@@ -482,15 +481,33 @@ async function scrapePage(url) {
 
     const tagMatches = [...html.matchAll(/href=['"]\/(tag|meme)\/([^'"]+)['"]/g)];
 
-    const tags = tagMatches.map(m => m[2].trim()).join(", ");
-    const tagsWithType = tagMatches.map(m => `${m[1]}:${m[2]}`).join(", ");
+    let memeType = "";
+    const tagList = [];
+
+    tagMatches.forEach(m => {
+      const type = m[1];
+      const name = m[2].trim().replace(/-/g, " "); // replace dashes with spaces
+
+      if (type === "meme") {
+        memeType = name;
+      } else {
+        tagList.push(name);
+      }
+    });
+
+    // Add "memes" if not present
+    if (!tagList.includes("memes") && !memeType.toLowerCase().includes("meme")) {
+      tagList.unshift("memes");
+    }
+
+    const tags = tagList.join(", ");
 
     const kymSlug = html.match(/knowyourmeme\.com\/memes\/([^"\/]+)/i)?.[1] ?? "";
 
-    return { title, imageUrl, tags, tagsWithType, kymSlug };
+    return { title, imageUrl, tags, memeType, kymSlug };
   } catch (err) {
     console.error(`scrapePage failed for ${url}:`, err.message);
-    return { title: "", imageUrl: "", tags: "", tagsWithType: "", kymSlug: "" };
+    return { title: "", imageUrl: "", tags: "", memeType: "", kymSlug: "" };
   }
 }
 
