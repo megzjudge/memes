@@ -392,6 +392,7 @@ async function updateViewCounts(env, log) {
       r.id = String(r.id || "").trim().replace(/^["']|["']$/g, "");
     });
 
+    // FULL PASS — process everything
     log("INFO", `Processing ALL ${rows.length} memes for view count updates...`);
 
     const REQUEST_DELAY_MS = 250;
