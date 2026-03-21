@@ -3,7 +3,7 @@ main = "worker.js"
 compatibility_date = "2026-03-21"
 compatibility_flags = ["nodejs_compat"]
 
-# Static assets binding (if you're serving anything)
+# Static assets - html, css, js, etc
 [assets]
 directory = "."
 binding = "ASSETS"
