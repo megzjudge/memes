@@ -386,17 +386,35 @@ function csvLine(fields) {
 }
 
 function parseCSV(text) {
-  const lines = text.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
+  if (typeof text !== 'string') {
+    console.error("parseCSV received non-string:", typeof text);
+    return [];
+  }
+
+  const lines = text.split(/\r?\n/)
+    .map(l => l.trim())
+    .filter(Boolean);
+
   if (lines.length < 1) return [];
 
-  const headers = lines.split(",").map(h => h.trim().toLowerCase());
+  // Fix: split the FIRST line only (headers)
+  const headers = lines[0].split(',')
+    .map(h => h.trim().toLowerCase());
+
   const rows = [];
 
   for (let i = 1; i < lines.length; i++) {
     if (!lines[i].trim()) continue;
-    const cols = lines[i].split(",").map(c => c.trim());
+
+    // Simple split — note: this breaks if fields contain commas inside quotes!
+    // If your CSV has quoted commas → you need a real CSV parser later
+    const cols = lines[i].split(',').map(c => c.trim());
+
     const row = {};
-    headers.forEach((h, idx) => row[h] = cols[idx] || "");
+    headers.forEach((h, idx) => {
+      row[h] = cols[idx] || "";
+    });
+
     rows.push(row);
   }
 
