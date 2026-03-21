@@ -882,4 +882,10 @@ const IMGFLIP_HEADERS = {
 const MBTI_TYPES = ["ESTP","ISTP","ESFP","ISFP","ESTJ","ISTJ","ESFJ","ISFJ","ENFP","INFP","ENFJ","INFJ","ENTJ","INTJ","ENTP","INTP"];
 const MBTI_SET = new Set(MBTI_TYPES);
 const MEME_TYPE_BLOCKLIST = new Set(["memes","mbti","myers briggs","personality"]);
+
+// Normalise comma-separated strings to always have ", " spacing
+function normaliseCommaList(str) {
+  if (!str) return "";
+  return str.split(",").map(s => s.trim()).filter(Boolean).join(", ");
+}
                      
