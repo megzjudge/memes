@@ -441,31 +441,31 @@ function parseCSV(text) {
 }
 
 async function scrapePage(url) {
-  if (!url) return { title: "", imageUrl: "", tags: "", kymSlug: "" };
+  if (!url) return { title: "", imageUrl: "", tags: "", tagsWithType: "", kymSlug: "" };
 
   try {
     const res = await fetch(url, { headers: { "User-Agent": "Mozilla/5.0" } });
-    if (!res.ok) return { title: "", imageUrl: "", tags: "", kymSlug: "" };
+    if (!res.ok) return { title: "", imageUrl: "", tags: "", tagsWithType: "", kymSlug: "" };
 
     const html = await res.text();
 
-    const titleMatch = html.match(/<title>(.*?)<\/title>/i);
-    const title = titleMatch ? titleMatch.replace(" - Imgflip", "").trim() : "";
+    const title = html.match(/<title>(.*?)<\/title>/i)?.[1]
+      ?.replace(" - Imgflip", "")
+      .trim() ?? "";
 
-    const imageMatch = html.match(/property="og:image" content="([^"]+)"/i);
-    const imageUrl = imageMatch ? imageMatch : "";
+    const imageUrl = html.match(/property="og:image" content="([^"]+)"/i)?.[1] ?? "";
 
-    const tagMatches = html.matchAll(/href='\/(tag|meme)\/([^']+)'/g);
-    const tagsWithType = Array.from(tagMatches)
-      .map(match => `${match[1]}:${match[2]}`)   // "tag:drake", "meme:hotline-bling"
-      .join(", ");
+    const tagMatchesArray = [...html.matchAll(/href='\/(tag|meme)\/([^']+)'/g)];
 
-    const kymMatch = html.match(/knowyourmeme.com\/memes\/([^"\/]+)/i);
-    const kymSlug = kymMatch ? kymMatch : "";
+    const tags = tagMatchesArray.map(m => m[2]).join(", ");
+    const tagsWithType = tagMatchesArray.map(m => `${m[1]}:${m[2]}`).join(", ");
 
-    return { title, imageUrl, tags, kymSlug };
-  } catch {
-    return { title: "", imageUrl: "", tags: "", kymSlug: "" };
+    const kymSlug = html.match(/knowyourmeme.com\/memes\/([^"\/]+)/i)?.[1] ?? "";
+
+    return { title, imageUrl, tags, tagsWithType, kymSlug };
+  } catch (err) {
+    console.error(`scrapePage failed for ${url}:`, err.message);
+    return { title: "", imageUrl: "", tags: "", tagsWithType: "", kymSlug: "" };
   }
 }
 
