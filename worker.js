@@ -486,7 +486,10 @@ async function scrapePage(url) {
 
     tagMatches.forEach(m => {
       const type = m[1];
-      const name = m[2].trim().replace(/-/g, " "); // replace dashes with spaces
+      const name = m[2]
+        .trim()
+        .replace(/[+-]/g, " ")   // replace BOTH + and - with space
+        .replace(/\s+/g, " ");   // collapse multiple spaces
 
       if (type === "meme") {
         memeType = name;
