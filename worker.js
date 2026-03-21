@@ -360,13 +360,14 @@ async function enrichItems(env, newItems, log) {
       return editedCount;
     }
 
-    // Optional cleanup before rebuild
+    // Cleanup before rebuild
     rows.forEach(r => {
       ['mbti_types', 'keywords', 'tags'].forEach(field => {
         let val = String(r[field] || "").trim();
         if (val.startsWith('"') && val.endsWith('"') && !val.includes(',')) {
           r[field] = val.slice(1, -1).trim();
         }
+        r[field] = r[field].replace(/""/g, '"'); // fix double-escaped quotes
       });
     });
 
@@ -491,12 +492,13 @@ function csvEscape(value) {
 
   if (s.startsWith('"') && s.endsWith('"') && s.length >= 2) {
     const inner = s.slice(1, -1);
-    if (!inner.includes('"') || inner.includes('""')) {
+    const quoteCount = (inner.match(/"/g) || []).length;
+    if (quoteCount % 2 === 0) {
       return s;
     }
   }
 
-  if (/[",\n\r]/.test(s)) {
+  if (s.includes(',') || s.includes('"') || s.includes('\n') || s.includes('\r')) {
     return `"${s.replace(/"/g, '""')}"`;
   }
 
