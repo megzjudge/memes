@@ -11,7 +11,7 @@ binding = "ASSETS"
 binding = "MEMES"
 
 [triggers]
-crons = ["*10 * * * *"]
+crons = ["*/5 * * * *"]
 
 # Paid Workers allow up to 10,000+ subrequests per invocation
 [limits]
