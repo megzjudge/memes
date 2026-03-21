@@ -6,7 +6,7 @@ export default {
     return env.ASSETS.fetch(request);
   },
 
-  async scheduled(event, env, ctx) {
+async scheduled(event, env, ctx) {
     const cronId = event.cron;
     const startTime = new Date().toISOString();
     const logs = [];
@@ -29,12 +29,12 @@ export default {
     }
 
     try {
-      log("INFO", "Step 1: Discovering new memes");
-      const newItems = await discoverNewMemes(env, user, pass, log);
-      log("INFO", `✅ Step 1 Complete: ${newItems.length} rows added`);
-
-      log("INFO", "Waiting 10 seconds before Step 2...");
-      await sleep(10000);
+      // log("INFO", "Step 1: Discovering new memes");
+      // const newItems = await discoverNewMemes(env, user, pass, log);
+      // log("INFO", `✅ Step 1 Complete: ${newItems.length} rows added`);
+      // log("INFO", "Waiting 10 seconds before Step 2...");
+      // await sleep(10000);
+      const newItems = []; // Step 1 temporarily disabled
 
       log("INFO", "Step 2: Enriching new items");
       const editedCount = await enrichItems(env, newItems, log);
@@ -48,7 +48,7 @@ export default {
       log("INFO", `✅ Step 3 Complete: ${updatedViewCount} rows edited`);
 
       log("INFO", "Full pipeline completed successfully", {
-        newMemesAdded: newItems.length,
+        newMemesAdded: 0,
         rowsEditedStep2: editedCount,
         rowsEditedStep3: updatedViewCount
       });
