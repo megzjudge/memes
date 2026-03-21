@@ -529,7 +529,7 @@ function processTags(tags) {
     if (MBTI_SET.has(t.toUpperCase())) return false;
     if (t === memeType) return false;
     return true;
-  }).map(k => k.replace(/-/g, " "));
+  }).map(k => k.replace(/[+-]/g, " ").replace(/\s+/g, " "));
 
   return { mbti, memeType, keywords };
 }
