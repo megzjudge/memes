@@ -165,7 +165,10 @@ async function discoverNewMemes(env, user, pass, log) {
       const lines = existingCsv.split("\n");
       for (let i = 1; i < lines.length; i++) {
         const cols = lines[i].split(",");
-        if (cols) existingIds.add(cols.trim().replace(/^"/, "").replace(/"$/, ""));
+        if (cols.length > 0) {
+          const id = cols[0].trim().replace(/^"/, "").replace(/"$/, "");
+          existingIds.add(id);
+        }
       }
     }
 
@@ -209,13 +212,6 @@ async function discoverNewMemes(env, user, pass, log) {
 // ======================
 // Step 2: Enrich / fill
 // ======================
-
-let csvText = await fetchGitHubFile(env, "memes.csv", log);
-if (typeof csvText !== 'string') {
-  log("ERROR", "fetchGitHubFile did not return a string", { type: typeof csvText });
-  return 0;
-}
-let rows = parseCSV(csvText);
 
 async function enrichItems(env, newItems, log) {
   try {
@@ -648,7 +644,7 @@ async function updateGitHubFile(env, filename, content, log) {
         },
         body: JSON.stringify({
           message: `Update ${filename} via Cloudflare Worker`,
-          content: btoa(content),
+          content: utf8ToBase64(content),
           sha
         })
       }
