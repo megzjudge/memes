@@ -699,3 +699,89 @@ mm=0;
 [*/5 * * * *] 2026-03-21T05:35:17.019Z [ERROR] enrichItems failed {"message":"lines.split is not a function","stack":"TypeError: lines.split is not a function\n    at parseCSV (worker.js:16503:25)\n    at enrichItems (worker.js:16355:16)\n    at async Object.scheduled (worker.js:16328:27)"}
 [*/5 * * * *] 2026-03-21T05:35:17.019Z [ERROR] Pipeline failed {"message":"lines.split is not a function","stack":"TypeError: lines.split is not a function\n    at parseCSV (worker.js:16503:25)\n    at enrichItems (worker.js:16355:16)\n    at async Object.scheduled (worker.js:16328:27)","cron":"*/5 * * * *","timestamp":"2026-03-21T05:35:17.374Z"}
 
+[*/30 * * * *] 2026-03-21T08:00:10.443Z [INFO] Cron started
+[*/30 * * * *] 2026-03-21T08:00:10.443Z [INFO] Step 2: Enriching new items
+[*/30 * * * *] 2026-03-21T08:00:10.443Z [DEBUG] Fetching memes.csv from GitHub for enrichment...
+[*/30 * * * *] 2026-03-21T08:00:10.443Z [DEBUG] Fetching memes.csv from GitHub...
+[*/30 * * * *] 2026-03-21T08:00:10.443Z [DEBUG] GitHub fetch memes.csv response status: 200
+[*/30 * * * *] 2026-03-21T08:00:10.443Z [DEBUG] Fetched memes.csv successfully (71497 bytes)
+[*/30 * * * *] 2026-03-21T08:00:10.443Z [DEBUG] Parsed 335 rows from memes.csv
+[*/30 * * * *] 2026-03-21T08:00:10.443Z [INFO] Enriching the 2 most recent memes: amp6jy, amp6a3
+[*/30 * * * *] 2026-03-21T08:00:10.443Z [DEBUG] Scraping https://imgflip.com/i/amp6jy...
+[*/30 * * * *] 2026-03-21T08:00:10.443Z [DEBUG] Scraped amp6jy: title="A and b are both c", tags="memes, Distracted-Boyfriend, sexy, sexual, psychology, arousal", kymSlug=""
+[*/30 * * * *] 2026-03-21T08:00:10.443Z [DEBUG] Updated amp6jy with 2 changes
+[*/30 * * * *] 2026-03-21T08:00:10.443Z [DEBUG] Scraping https://imgflip.com/i/amp6a3...
+[*/30 * * * *] 2026-03-21T08:00:10.443Z [DEBUG] Scraped amp6a3: title="Why love, at all?Let them drive you...", tags="memes, Boardroom-Meeting-Suggestion, love, relatable+memes, relationships, psychology", kymSlug=""
+[*/30 * * * *] 2026-03-21T08:00:10.443Z [DEBUG] Updated amp6a3 with 5 changes
+[*/30 * * * *] 2026-03-21T08:00:10.443Z [DEBUG] Enrichment complete. 2 of 2 rows were edited
+[*/30 * * * *] 2026-03-21T08:00:10.443Z [DEBUG] Updated CSV size: 95385 bytes
+[*/30 * * * *] 2026-03-21T08:00:10.443Z [DEBUG] Uploading enriched memes.csv to GitHub...
+[*/30 * * * *] 2026-03-21T08:00:10.443Z [DEBUG] Getting SHA for memes.csv...
+[*/30 * * * *] 2026-03-21T08:00:10.443Z [DEBUG] SHA fetch response status: 200
+[*/30 * * * *] 2026-03-21T08:00:10.443Z [DEBUG] Got SHA for memes.csv: 6e1f37e5865efe2977acea3440b11e369ad752b5
+[*/30 * * * *] 2026-03-21T08:00:10.443Z [DEBUG] Uploading memes.csv to GitHub (95385 bytes)...
+[*/30 * * * *] 2026-03-21T08:00:10.443Z [DEBUG] GitHub PUT response status: 200
+[*/30 * * * *] 2026-03-21T08:00:10.443Z [INFO] Successfully synced memes.csv to GitHub
+[*/30 * * * *] 2026-03-21T08:00:10.443Z [DEBUG] Enriched memes.csv uploaded successfully
+[*/30 * * * *] 2026-03-21T08:00:10.443Z [INFO] Edited 2 of the last 2 memes
+[*/30 * * * *] 2026-03-21T08:00:10.443Z [INFO] ✅ Step 2 Complete: 2 rows edited
+[*/30 * * * *] 2026-03-21T08:00:10.443Z [INFO] Waiting 10 seconds before Step 3...
+[*/30 * * * *] 2026-03-21T08:00:10.443Z [INFO] Step 3: Updating view counts
+[*/30 * * * *] 2026-03-21T08:00:10.443Z [DEBUG] Fetching memes.csv from GitHub for view count update...
+[*/30 * * * *] 2026-03-21T08:00:10.443Z [DEBUG] Fetching memes.csv from GitHub...
+[*/30 * * * *] 2026-03-21T08:00:10.443Z [DEBUG] GitHub fetch memes.csv response status: 200
+[*/30 * * * *] 2026-03-21T08:00:10.443Z [DEBUG] Fetched memes.csv successfully (95385 bytes)
+[*/30 * * * *] 2026-03-21T08:00:10.443Z [DEBUG] Parsed 335 rows from memes.csv
+[*/30 * * * *] 2026-03-21T08:00:10.443Z [INFO] Triggered at :0 — Batch 1/17: memes 0 to 29 (of 335)
+[*/30 * * * *] 2026-03-21T08:00:10.443Z [DEBUG] Fetching existing meme-views.csv from GitHub...
+[*/30 * * * *] 2026-03-21T08:00:10.443Z [DEBUG] Fetching meme-views.csv from GitHub...
+[*/30 * * * *] 2026-03-21T08:00:10.443Z [DEBUG] GitHub fetch meme-views.csv response status: 200
+[*/30 * * * *] 2026-03-21T08:00:10.443Z [DEBUG] Fetched meme-views.csv successfully (13532 bytes)
+[*/30 * * * *] 2026-03-21T08:00:10.443Z [DEBUG] Loaded 334 existing view counts
+[*/30 * * * *] 2026-03-21T08:00:10.443Z [DEBUG] View count changed for amp6jy: 25 → 43
+[*/30 * * * *] 2026-03-21T08:00:10.443Z [DEBUG] View count changed for amp6a3: 122 → 130
+[*/30 * * * *] 2026-03-21T08:00:10.443Z [DEBUG] View count changed for amp5cb: 120 → 130
+[*/30 * * * *] 2026-03-21T08:00:10.443Z [DEBUG] View count changed for amp515: 114 → 122
+[*/30 * * * *] 2026-03-21T08:00:10.443Z [DEBUG] View count changed for ami51o: 184 → 190
+[*/30 * * * *] 2026-03-21T08:00:10.443Z [DEBUG] View count changed for alaq8m: 406 → 414
+[*/30 * * * *] 2026-03-21T08:00:10.443Z [DEBUG] View count changed for akve8g: 257 → 261
+[*/30 * * * *] 2026-03-21T08:00:10.443Z [DEBUG] View count changed for ak9r2p: 245 → 247
+[*/30 * * * *] 2026-03-21T08:00:10.443Z [DEBUG] View count changed for ak7nnk: 268 → 271
+[*/30 * * * *] 2026-03-21T08:00:10.443Z [DEBUG] View count changed for ak7na8: 212 → 215
+[*/30 * * * *] 2026-03-21T08:00:10.443Z [DEBUG] View count changed for ak7mwo: 125 → 127
+[*/30 * * * *] 2026-03-21T08:00:10.443Z [DEBUG] View count changed for ajqbpz: 121 → 123
+[*/30 * * * *] 2026-03-21T08:00:10.443Z [DEBUG] View count changed for ajpoa5: 109 → 113
+[*/30 * * * *] 2026-03-21T08:00:10.443Z [DEBUG] View count changed for agw8cx: 109 → 111
+[*/30 * * * *] 2026-03-21T08:00:10.443Z [DEBUG] View count changed for agw88l: 122 → 125
+[*/30 * * * *] 2026-03-21T08:00:10.443Z [DEBUG] View count changed for aggfbp: 2810 → 2813
+[*/30 * * * *] 2026-03-21T08:00:10.443Z [DEBUG] View count changed for agdbk8: 93 → 95
+[*/30 * * * *] 2026-03-21T08:00:10.443Z [DEBUG] View count changed for agdaqs: 210 → 213
+[*/30 * * * *] 2026-03-21T08:00:10.443Z [DEBUG] View count changed for agda8d: 126 → 128
+[*/30 * * * *] 2026-03-21T08:00:10.443Z [DEBUG] View count changed for afv58c: 143 → 145
+[*/30 * * * *] 2026-03-21T08:00:10.443Z [DEBUG] View count changed for afsgo0: 3066 → 3069
+[*/30 * * * *] 2026-03-21T08:00:10.443Z [DEBUG] View count changed for afsgcp: 93 → 96
+[*/30 * * * *] 2026-03-21T08:00:10.443Z [DEBUG] View count changed for afnifv: 403 → 407
+[*/30 * * * *] 2026-03-21T08:00:10.443Z [DEBUG] View count changed for afni5m: 175 → 177
+[*/30 * * * *] 2026-03-21T08:00:10.443Z [DEBUG] View count changed for afitas: 102 → 104
+[*/30 * * * *] 2026-03-21T08:00:10.443Z [DEBUG] View count changed for afgbjd: 194 → 197
+[*/30 * * * *] 2026-03-21T08:00:10.443Z [DEBUG] View count changed for afg83p: 164 → 166
+[*/30 * * * *] 2026-03-21T08:00:10.443Z [DEBUG] View count changed for afaawn: 121 → 124
+[*/30 * * * *] 2026-03-21T08:00:10.443Z [DEBUG] View count changed for afaapw: 144 → 146
+[*/30 * * * *] 2026-03-21T08:00:10.443Z [DEBUG] View count changed for af9271: 136 → 138
+[*/30 * * * *] 2026-03-21T08:00:10.443Z [DEBUG] Batch complete. 30 updates this batch
+[*/30 * * * *] 2026-03-21T08:00:10.443Z [DEBUG] Batch CSV size: 1212 bytes
+[*/30 * * * *] 2026-03-21T08:00:10.443Z [DEBUG] Fetching meme-views.csv from GitHub...
+[*/30 * * * *] 2026-03-21T08:00:10.443Z [DEBUG] GitHub fetch meme-views.csv response status: 200
+[*/30 * * * *] 2026-03-21T08:00:10.443Z [DEBUG] Fetched meme-views.csv successfully (13532 bytes)
+[*/30 * * * *] 2026-03-21T08:00:10.443Z [DEBUG] Uploading meme-views.csv to GitHub...
+[*/30 * * * *] 2026-03-21T08:00:10.443Z [DEBUG] Getting SHA for meme-views.csv...
+[*/30 * * * *] 2026-03-21T08:00:10.443Z [DEBUG] SHA fetch response status: 200
+[*/30 * * * *] 2026-03-21T08:00:10.443Z [DEBUG] Got SHA for meme-views.csv: ee54d81a89fb077ab7e0f8a065fec124d027d64e
+[*/30 * * * *] 2026-03-21T08:00:10.443Z [DEBUG] Uploading meme-views.csv to GitHub (1212 bytes)...
+[*/30 * * * *] 2026-03-21T08:00:10.443Z [DEBUG] GitHub PUT response status: 200
+[*/30 * * * *] 2026-03-21T08:00:10.443Z [INFO] Successfully synced meme-views.csv to GitHub
+[*/30 * * * *] 2026-03-21T08:00:10.443Z [DEBUG] meme-views.csv uploaded successfully
+[*/30 * * * *] 2026-03-21T08:00:10.443Z [INFO] Updated 30 rows this batch (out of 30 processed)
+[*/30 * * * *] 2026-03-21T08:00:10.443Z [INFO] ✅ Step 3 Complete: 30 rows edited
+[*/30 * * * *] 2026-03-21T08:00:10.443Z [INFO] Full pipeline completed successfully {"newMemesAdded":0,"rowsEditedStep2":2,"rowsEditedStep3":30}
+
