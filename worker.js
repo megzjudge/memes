@@ -133,13 +133,20 @@ async function discoverNewMemes(env, user, pass, log) {
       /href\s*=\s*["']?\/i\/([a-z0-9]{6,8})["'][^>]*>[\s\S]*?<img[^>]+src=["'](https:\/\/i\.imgflip\.com\/[a-z0-9]+\.(?:jpg|png|gif))["']/gi,
       /href\s*=\s*["']?\/gif\/([a-z0-9]{6,8})["']/gi
     ];
-
+    
     const seen = new Set();
     for (const rx of regexes) {
       let match;
       while ((match = rx.exec(html)) !== null) {
-        const id = match;
-        let imageUrl = match || `https://i.imgflip.com/${id}.gif`;
+        const id = match[1];  // always the ID group
+    
+        let imageUrl;
+        if (rx.source.includes('src=')) {  // rough check: it's the image regex
+          imageUrl = match[2] || `https://i.imgflip.com/${id}.jpg`;  // fallback to jpg if missing
+        } else {
+          imageUrl = `https://i.imgflip.com/${id}.gif`;
+        }
+    
         if (!seen.has(id)) {
           seen.add(id);
           items.push({ id, imageUrl });
@@ -449,7 +456,9 @@ async function scrapePage(url) {
     const imageUrl = imageMatch ? imageMatch : "";
 
     const tagMatches = html.matchAll(/href='\/(tag|meme)\/([^']+)'/g);
-    const tags = [...tagMatches].map(m => m).join(", ");
+    const tagsWithType = Array.from(tagMatches)
+      .map(match => `${match[1]}:${match[2]}`)   // "tag:drake", "meme:hotline-bling"
+      .join(", ");
 
     const kymMatch = html.match(/knowyourmeme.com\/memes\/([^"\/]+)/i);
     const kymSlug = kymMatch ? kymMatch : "";
