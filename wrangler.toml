@@ -3,18 +3,14 @@ main = "worker.js"
 compatibility_date = "2026-03-21"
 compatibility_flags = ["nodejs_compat"]
 
-# Static assets - html, css, js, etc
 [assets]
 directory = "."
 binding = "ASSETS"
 
-# Browser / Puppeteer binding for Step 1 (when enabled)
 [browser]
 binding = "MEMES"
 
 # 17 staggered cron triggers — each processes one batch of 30 memes
-# Runs every hour from :00 to :48 (every 3 minutes)
-# Covers ~510 memes per hour (17 batches × 30)
 [[triggers]]
 crons = ["0 * * * *"]   # Batch 0 — memes 0–29 at :00
 
@@ -66,7 +62,6 @@ crons = ["45 * * * *"]  # Batch 15 — 450–479 at :45
 [[triggers]]
 crons = ["48 * * * *"]  # Batch 16 — 480–509 at :48
 
-# Observability / Logging (your current settings)
 [observability]
 enabled = false
 
@@ -80,7 +75,3 @@ invocation_logs = true
 enabled = false
 persist = true
 head_sampling_rate = 1
-
-# Uncomment when you go Paid Workers ($5/mo) to remove batching
-# [limits]
-# subrequests = 1000
