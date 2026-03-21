@@ -663,3 +663,12 @@ mm=0;
 [*/5 * * * *] 2026-03-21T05:05:18.423Z [ERROR] discoverNewMemes failed {"message":"Unable to create new browser: code: 429: message: Rate limit exceeded","stack":"Error: Unable to create new browser: code: 429: message: Rate limit exceeded\n    at PuppeteerWorkers.launch (worker.js:14811:13)\n    at async discoverNewMemes (worker.js:16368:17)\n    at async Object.scheduled (worker.js:16328:24)"}
 [*/5 * * * *] 2026-03-21T05:05:18.423Z [ERROR] Pipeline failed {"message":"Unable to create new browser: code: 429: message: Rate limit exceeded","stack":"Error: Unable to create new browser: code: 429: message: Rate limit exceeded\n    at PuppeteerWorkers.launch (worker.js:14811:13)\n    at async discoverNewMemes (worker.js:16368:17)\n    at async Object.scheduled (worker.js:16328:24)","cron":"*/5 * * * *","timestamp":"2026-03-21T05:05:21.749Z"}
 
+[*/5 * * * *] 2026-03-21T05:20:17.616Z [INFO] Cron started
+[*/5 * * * *] 2026-03-21T05:20:17.616Z [INFO] Step 2: Enriching new items
+[*/5 * * * *] 2026-03-21T05:20:17.616Z [DEBUG] Fetching memes.csv from GitHub for enrichment...
+[*/5 * * * *] 2026-03-21T05:20:17.616Z [DEBUG] Fetching memes.csv from GitHub...
+[*/5 * * * *] 2026-03-21T05:20:17.616Z [DEBUG] GitHub fetch memes.csv response status: 200
+[*/5 * * * *] 2026-03-21T05:20:17.616Z [DEBUG] Fetched memes.csv successfully (78600 bytes)
+[*/5 * * * *] 2026-03-21T05:20:17.616Z [ERROR] enrichItems failed {"message":"lines.split is not a function","stack":"TypeError: lines.split is not a function\n    at parseCSV (worker.js:16503:25)\n    at enrichItems (worker.js:16355:16)\n    at async Object.scheduled (worker.js:16328:27)"}
+[*/5 * * * *] 2026-03-21T05:20:17.616Z [ERROR] Pipeline failed {"message":"lines.split is not a function","stack":"TypeError: lines.split is not a function\n    at parseCSV (worker.js:16503:25)\n    at enrichItems (worker.js:16355:16)\n    at async Object.scheduled (worker.js:16328:27)","cron":"*/5 * * * *","timestamp":"2026-03-21T05:20:17.989Z"}
+
