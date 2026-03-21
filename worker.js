@@ -289,6 +289,9 @@ async function enrichItems(env, newItems, log) {
 
     rows.forEach(r => {
       r.id = String(r.id || "").trim().replace(/^["']|["']$/g, "");
+      r.mbti_types = normaliseCommaList(r.mbti_types);
+      r.keywords   = normaliseCommaList(r.keywords);
+      r.tags       = normaliseCommaList(r.tags);
     });
     rows.sort((a, b) => b.id.localeCompare(a.id));
 
@@ -320,15 +323,13 @@ async function enrichItems(env, newItems, log) {
         changes++;
       }
 
-      // Process tags into arrays with commas
-      const tagsArray = tags.split(", ").filter(t => t.trim());
+      const tagsArray   = tags.split(",").map(t => t.trim()).filter(Boolean);
       const { mbti, memeType, keywords } = processTags(tagsArray);
-
-      // Store as comma-separated strings
-      const mbtiStr = mbti.join(", ");
-      const keywordsStr = keywords.join(", ");
-      const tagsStr = tagsArray.join(", ");
-
+      
+      const mbtiStr     = normaliseCommaList(mbti.join(", "));
+      const keywordsStr = normaliseCommaList(keywords.join(", "));
+      const tagsStr     = normaliseCommaList(tagsArray.join(", "));
+      
       if (memeType && memeType !== row.meme_type) {
         row.meme_type = memeType;
         changes++;
