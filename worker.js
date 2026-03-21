@@ -295,7 +295,7 @@ async function enrichItems(env, newItems, log) {
     let rows = parseCSV(csvText);
     log("DEBUG", `Parsed ${rows.length} rows from memes.csv`);
 
-    // Clean IDs and sort newest first (higher ID = newer)
+    // Clean IDs and sort newest first
     rows.forEach(r => {
       r.id = String(r.id || "").trim().replace(/^["']|["']$/g, "");
     });
@@ -387,12 +387,11 @@ async function updateViewCounts(env, log) {
     let rows = parseCSV(csvText);
     log("DEBUG", `Parsed ${rows.length} rows from memes.csv`);
 
-    // Clean IDs (just in case)
+    // Clean IDs
     rows.forEach(r => {
       r.id = String(r.id || "").trim().replace(/^["']|["']$/g, "");
     });
 
-    // FULL PASS — process everything
     log("INFO", `Processing ALL ${rows.length} memes for view count updates...`);
 
     const REQUEST_DELAY_MS = 250;
@@ -533,7 +532,7 @@ function parseCSV(text) {
 
   if (lines.length < 1) return [];
 
-  // Headers from first line
+  // Parse headers (first line)
   const headers = parseLine(lines[0]).map(h => h.trim().toLowerCase());
 
   const rows = [];
@@ -555,7 +554,6 @@ function parseCSV(text) {
   return rows;
 }
 
-// Quote-aware CSV line parser
 function parseLine(line, delimiter = ",") {
   const result = [];
   let current = "";
@@ -567,7 +565,7 @@ function parseLine(line, delimiter = ",") {
     if (char === '"') {
       if (inQuotes && line[i + 1] === '"') {
         current += '"';
-        i++; // skip escaped quote
+        i++;
       } else {
         inQuotes = !inQuotes;
       }
@@ -584,7 +582,7 @@ function parseLine(line, delimiter = ",") {
   }
 
   result.push(current);
-  return result;
+  return result.map(x => x.trim().replace(/^["']|["']$/g, "")); // strip outer quotes
 }
 
 // Quote-aware CSV line splitter
