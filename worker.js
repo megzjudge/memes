@@ -428,6 +428,41 @@ function csvLine(fields) {
   return fields.map(csvEscape).join(",");
 }
 
+function splitCsvLine(line, delimiter = ",") {
+  const s = String(line);
+  const out = [];
+  let cur = "";
+  let inQuotes = false;
+
+  for (let i = 0; i < s.length; i++) {
+    const ch = s[i];
+
+    if (ch === '"') {
+      const next = s[i + 1];
+      if (inQuotes && next === '"') {
+        // Escaped quote
+        cur += '"';
+        i++;
+      } else {
+        // Toggle quote state
+        inQuotes = !inQuotes;
+      }
+      continue;
+    }
+
+    if (!inQuotes && ch === delimiter) {
+      out.push(cur);
+      cur = "";
+      continue;
+    }
+
+    cur += ch;
+  }
+
+  out.push(cur);
+  return out.map(x => x.trim());
+}
+
 function parseCSV(text) {
   if (typeof text !== 'string') {
     console.error("parseCSV received non-string:", typeof text);
@@ -440,8 +475,8 @@ function parseCSV(text) {
 
   if (lines.length < 1) return [];
 
-  // Fix: split the FIRST line only (headers)
-  const headers = lines[0].split(',')
+  // Parse headers (first line only)
+  const headers = splitCsvLine(lines, ',')
     .map(h => h.trim().toLowerCase());
 
   const rows = [];
@@ -449,9 +484,8 @@ function parseCSV(text) {
   for (let i = 1; i < lines.length; i++) {
     if (!lines[i].trim()) continue;
 
-    // Simple split — note: this breaks if fields contain commas inside quotes!
-    // If your CSV has quoted commas → you need a real CSV parser later
-    const cols = lines[i].split(',').map(c => c.trim());
+    // Use quote-aware split
+    const cols = splitCsvLine(lines[i], ',');
 
     const row = {};
     headers.forEach((h, idx) => {
@@ -462,6 +496,42 @@ function parseCSV(text) {
   }
 
   return rows;
+}
+
+// Quote-aware CSV line splitter
+function splitCsvLine(line, delimiter = ",") {
+  const s = String(line);
+  const out = [];
+  let cur = "";
+  let inQuotes = false;
+
+  for (let i = 0; i < s.length; i++) {
+    const ch = s[i];
+
+    if (ch === '"') {
+      const next = s[i + 1];
+      if (inQuotes && next === '"') {
+        // Escaped quote
+        cur += '"';
+        i++;
+      } else {
+        // Toggle quote state
+        inQuotes = !inQuotes;
+      }
+      continue;
+    }
+
+    if (!inQuotes && ch === delimiter) {
+      out.push(cur);
+      cur = "";
+      continue;
+    }
+
+    cur += ch;
+  }
+
+  out.push(cur);
+  return out.map(x => x.trim());
 }
 
 async function scrapePage(url) {
