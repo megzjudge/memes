@@ -173,21 +173,25 @@ async function discoverNewMemes(env, log) {
     log("INFO", `Found ${trulyNew.length} new memes`);
 
     if (trulyNew.length > 0) {
-      let updatedCsv =
-        existingCsv ||
-        "ID,URLS,IMAGE_URL,IS_GIF,TITLE,MEME_TYPE,KYM_SLUG,MBTI_TYPES,KEYWORDS,TAGS\n";
-
-      trulyNew.forEach(item => {
+      let baseCsv = (existingCsv || "ID,URLS,IMAGE_URL,IS_GIF,TITLE,MEME_TYPE,KYM_SLUG,MBTI_TYPES,KEYWORDS,TAGS\n").trimEnd() + "\n";
+      
+      let newRows = trulyNew.map(item => {
         const isGif = item.imageUrl.includes(".gif");
-        updatedCsv += csvLine([
+        return csvLine([
           item.id,
           `https://imgflip.com/${isGif ? "gif" : "i"}/${item.id}`,
           item.imageUrl,
           isGif ? "TRUE" : "FALSE",
           item.id,
           "", "", "", "", ""
-        ]) + "\n";
-      });
+        ]);
+      }).join("\n") + "\n";
+      
+      const existingWithoutHeader = baseCsv.split("\n").slice(1).join("\n");
+      const updatedCsv = newRows + existingWithoutHeader + "\n";
+      
+      await updateGitHubFile(env, "memes.csv", updatedCsv, log);
+      log("INFO", `Added ${trulyNew.length} new rows at top`);
 
       await updateGitHubFile(env, "memes.csv", updatedCsv, log);
       log("INFO", `Added ${trulyNew.length} rows`);
