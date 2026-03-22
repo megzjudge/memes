@@ -1,6 +1,4 @@
 // worker.js
-import puppeteer from "@cloudflare/puppeteer";
-
 export default {
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
@@ -34,17 +32,9 @@ export default {
 
     log("INFO", "Cron started");
 
-    const user = env.IMGFLIP_USER;
-    const pass = env.IMGFLIP_PASS;
-
-    if (!user || !pass) {
-      log("ERROR", "Missing IMGFLIP_USER or IMGFLIP_PASS");
-      return;
-    }
-
     try {
       log("INFO", "Step 1: Discovering new memes");
-      const newItems = await discoverNewMemes(env, user, pass, log);
+      const newItems = await discoverNewMemes(env, log);
       log("INFO", `✅ Step 1 Complete: ${newItems.length} rows added`);
 
       log("INFO", "Step 2: Enriching new items");
@@ -58,17 +48,10 @@ export default {
       const updatedViewCount = await updateViewCounts(env, log);
       log("INFO", `✅ Step 3 Complete: ${updatedViewCount} rows edited`);
 
-      log("INFO", "Full pipeline completed successfully", {
-        newMemesAdded: 0,
-        rowsEditedStep2: editedCount,
-        rowsEditedStep3: updatedViewCount
-      });
     } catch (err) {
       log("ERROR", "Pipeline failed", {
         message: err.message,
-        stack: err.stack || "No stack",
-        cron: cronId,
-        timestamp: new Date().toISOString()
+        stack: err.stack
       });
     }
   }
@@ -78,63 +61,46 @@ function utf8ToBase64(str) {
   return btoa(unescape(encodeURIComponent(str)));
 }
 
-// Step 1: Discover new memes (disabled for now)
-async function discoverNewMemes(env, user, pass, log) {
-  let browser;
+//
+// ✅ STEP 1
+//
+async function discoverNewMemes(env, log) {
   try {
-    log("DEBUG", "Launching browser...");
-    try {
-      browser = await puppeteer.launch(env.MEMES, { 
-        keep_alive: 0,
-        protocolTimeout: 30000
-      });
-    } catch (launchErr) {
-      log("WARN", "Initial browser launch failed, retrying...", { message: launchErr.message });
-      await sleep(3000);
-      browser = await puppeteer.launch(env.MEMES, { 
-        keep_alive: 0,
-        protocolTimeout: 30000
-      });
+    const cookie = env.IMGFLIP_COOKIE;
+    if (!cookie) {
+      log("ERROR", "Missing IMGFLIP_COOKIE");
+      return [];
     }
 
-    const page = await browser.newPage();
-    log("DEBUG", "Navigating to login page...");
-    await page.goto("https://imgflip.com/login", { waitUntil: "networkidle0" });
+    log("DEBUG", "Fetching memes page with auth cookie...");
 
-    log("DEBUG", "Filling login form...");
-    await page.type("#username", user);
-    await page.type("#password", pass);
+    const res = await fetch(
+      "https://imgflip.com/all/user-images/mbtininja?sort=latest",
+      {
+        headers: {
+          ...IMGFLIP_HEADERS,
+          "Cookie": cookie
+        }
+      }
+    );
 
-    log("DEBUG", "Submitting login...");
-    await Promise.all([
-      page.waitForNavigation({ waitUntil: "networkidle0" }),
-      page.click("#login-submit")
-    ]);
-
-    log("DEBUG", "Login complete, navigating to memes page...");
-    await page.goto("https://imgflip.com/all/user-images/mbtininja?sort=latest", {
-      waitUntil: "networkidle0"
-    });
-
-    const html = await page.content();
-    log("DEBUG", `Memes page fetched (${html.length} bytes)`);
+    const html = await res.text();
+    log("DEBUG", `Fetched ${html.length} bytes`);
 
     const items = [];
-    const regexes = [
-      /href\s*=\s*["']?\/i\/([a-z0-9]{6,8})["'][^>]*>[\s\S]*?<img[^>]+src=["'](https:\/\/i\.imgflip\.com\/[a-z0-9]+\.(?:jpg|png|gif))["']/gi,
-      /href\s*=\s*["']?\/gif\/([a-z0-9]{6,8})["']/gi
-    ];
-
     const seen = new Set();
-    for (const rx of regexes) {
-      let match;
-      while ((match = rx.exec(html)) !== null) {
-        const id = match[1];
-        let imageUrl = rx.source.includes('src=') ? match[2] : `https://i.imgflip.com/${id}.gif`;
-        if (!seen.has(id)) {
-          seen.add(id);
-          items.push({ id, imageUrl });
-        }
+
+    const regex =
+      /href\s*=\s*["']?\/(i|gif)\/([a-z0-9]{6,8})["'][^>]*>[\s\S]*?<img[^>]+src=["']([^"']+)["']/gi;
+
+    let match;
+    while ((match = regex.exec(html)) !== null) {
+      const id = match[2];
+      const imageUrl = match[3];
+
+      if (!seen.has(id)) {
+        seen.add(id);
+        items.push({ id, imageUrl });
       }
     }
 
@@ -142,45 +108,44 @@ async function discoverNewMemes(env, user, pass, log) {
 
     let existingCsv = await fetchGitHubFile(env, "memes.csv", log);
     const existingIds = new Set();
+
     if (existingCsv) {
       const lines = existingCsv.split("\n");
       for (let i = 1; i < lines.length; i++) {
-        const cols = lines[i].split(",");
-        if (cols.length > 0) {
-          const id = cols[0].trim().replace(/^["']|["']$/g, "");
-          existingIds.add(id);
-        }
+        const id = lines[i].split(",")[0]?.trim();
+        if (id) existingIds.add(id);
       }
     }
 
-    const trulyNew = items.filter(item => !existingIds.has(item.id));
+    const trulyNew = items.filter(x => !existingIds.has(x.id));
     log("INFO", `Found ${trulyNew.length} new memes`);
 
     if (trulyNew.length > 0) {
-      let updatedCsv = existingCsv || "ID,URLS,IMAGE_URL,IS_GIF,TITLE,MEME_TYPE,KYM_SLUG,MBTI_TYPES,KEYWORDS,TAGS\n";
+      let updatedCsv =
+        existingCsv ||
+        "ID,URLS,IMAGE_URL,IS_GIF,TITLE,MEME_TYPE,KYM_SLUG,MBTI_TYPES,KEYWORDS,TAGS\n";
+
       trulyNew.forEach(item => {
-        const isGif = item.imageUrl.toLowerCase().includes(".gif");
-        const row = [
+        const isGif = item.imageUrl.includes(".gif");
+        updatedCsv += csvLine([
           item.id,
           `https://imgflip.com/${isGif ? "gif" : "i"}/${item.id}`,
           item.imageUrl,
           isGif ? "TRUE" : "FALSE",
           item.id,
           "", "", "", "", ""
-        ];
-        updatedCsv += csvLine(row) + "\n";
+        ]) + "\n";
       });
 
       await updateGitHubFile(env, "memes.csv", updatedCsv, log);
-      log("INFO", `Added ${trulyNew.length} new rows`);
+      log("INFO", `Added ${trulyNew.length} rows`);
     }
 
     return trulyNew;
+
   } catch (err) {
-    log("ERROR", "discoverNewMemes failed", { message: err.message, stack: err.stack });
-    throw err;
-  } finally {
-    if (browser) await browser.close();
+    log("ERROR", "discoverNewMemes failed", err);
+    return [];
   }
 }
 
