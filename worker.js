@@ -1,17 +1,17 @@
 // worker.js
 
 //
-// 📧 EMAIL HELPER (Cloudflare Email Routing)
-// Place this near the top so all functions can use it
+// 📧 Email Helper
 //
 async function sendEmail(env, { subject, message }) {
   try {
     await env.EMAIL.send({
-      to: "fox@mbti.ninja",
-      from: "worker@mbti.ninja",
+      from: env.ROUTING_EMAIL,
+      to: env.ROUTING_EMAIL,
       subject,
       text: message
     });
+    console.log(`Email sent from ${env.ROUTING_EMAIL} to ${env.ROUTING_EMAIL}`);
   } catch (err) {
     console.error("Email send failed:", err.message);
   }
