@@ -281,6 +281,11 @@ async function scrapePage(url) {
       }
     });
 
+    // Determine if the meme type needs fallback to /memegenerator/
+    if (!memeType) {
+      memeType = html.includes('/memegenerator/') ? "memegenerator" : "";
+    }
+
     if (!tagList.includes("memes") && !memeType.toLowerCase().includes("meme")) {
       tagList.unshift("memes");
     }
@@ -491,10 +496,8 @@ async function discoverNewMemes(env, log) {
         ]);
       }).join("\n");
 
-      // Add new rows to the existing ones (header already included in `header`)
       const updatedCsv = header + newRows + "\n" + rows.join("\n");
 
-      // Update the CSV file with new rows
       await updateGitHubFile(env, "memes.csv", updatedCsv, log);
       log("INFO", `Added ${trulyNew.length} new rows at top`);
     }
