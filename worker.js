@@ -436,8 +436,10 @@ async function discoverNewMemes(env, log) {
     log("INFO", `Found ${trulyNew.length} new memes`);
 
     if (trulyNew.length > 0) {
-      let baseCsv = (existingCsv || "ID,URLS,IMAGE_URL,IS_GIF,TITLE,MEME_TYPE,KYM_SLUG,MBTI_TYPES,KEYWORDS,TAGS\n").trimEnd() + "\n";
-
+      // Ensure the header is preserved and the new rows are appended
+      let baseCsv = existingCsv ? existingCsv.trimEnd() : "ID,URLS,IMAGE_URL,IS_GIF,TITLE,MEME_TYPE,KYM_SLUG,MBTI_TYPES,KEYWORDS,TAGS\n";
+      
+      // Create the new rows and prepend them
       let newRows = trulyNew.map(item => {
         const isGif = item.imageUrl.includes(".gif");
         return csvLine([
@@ -448,10 +450,11 @@ async function discoverNewMemes(env, log) {
           item.id,
           "", "", "", "", ""
         ]);
-      }).join("\n") + "\n";
+      }).join("\n");
 
+      // Ensure the CSV structure is maintained with header, new rows, and existing data
       const existingWithoutHeader = baseCsv.split("\n").slice(1).join("\n");
-      const updatedCsv = newRows + existingWithoutHeader + "\n";
+      const updatedCsv = newRows + "\n" + existingWithoutHeader;
 
       // ✅ Fixed: only call updateGitHubFile once
       await updateGitHubFile(env, "memes.csv", updatedCsv, log);
