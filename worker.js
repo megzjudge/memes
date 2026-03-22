@@ -205,13 +205,43 @@ async function updateGitHubFile(env, filename, content, log) {
 
 async function sendEmail(env, { subject, message }) {
   try {
-    await env.EMAIL.send({
+    const emailApiKey = env.ROUTING_EMAIL_API;
+    
+    if (!emailApiKey) {
+      throw new Error("No ROUTING_EMAIL_API secret found");
+    }
+
+    const emailData = {
       from: env.ROUTING_EMAIL,
       to: env.ROUTING_EMAIL,
       subject,
       text: message
+    };
+
+    const res = await fetch("https://api.sendgrid.com/v3/mail/send", {
+      method: "POST",
+      headers: {
+        "Authorization": `Bearer ${emailApiKey}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        personalizations: [{
+          to: [{ email: env.ROUTING_EMAIL }],
+          subject: subject,
+        }],
+        from: { email: env.ROUTING_EMAIL },
+        content: [{
+          type: "text/plain",
+          value: message
+        }]
+      })
     });
-    console.log(`Email sent from ${env.ROUTING_EMAIL} to ${env.ROUTING_EMAIL}`);
+
+    if (!res.ok) {
+      throw new Error(`Failed to send email: ${res.statusText}`);
+    }
+
+    console.log(`Email sent successfully from ${env.ROUTING_EMAIL} to ${env.ROUTING_EMAIL}`);
   } catch (err) {
     console.error("Email send failed:", err.message);
   }
