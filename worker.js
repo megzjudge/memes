@@ -129,7 +129,7 @@ async function discoverNewMemes(env, log) {
     log("INFO", "Fetching memes page...");
 
     const pageRes = await fetch(
-      "https://imgflip.com/all/user-images/mbtininja?sort=latest",
+      "https://imgflip.com/all/user-images/mbtininja?sort=latest&type=nsfw", // Added NSFW filter to URL
       {
         headers: {
           ...IMGFLIP_HEADERS,
@@ -149,7 +149,13 @@ async function discoverNewMemes(env, log) {
     let match;
     while ((match = regex.exec(pageHtml)) !== null) {
       const id = match[2];
-      const imageUrl = match[3];
+      let imageUrl = match[3];
+
+      // Correct the image URL if necessary
+      if (imageUrl.startsWith("//")) {
+        imageUrl = `https:${imageUrl}`;
+      }
+
       if (!seen.has(id)) {
         seen.add(id);
         items.push({ id, imageUrl });
@@ -163,7 +169,7 @@ async function discoverNewMemes(env, log) {
     const existingIds = new Set();
     if (existingCsv) {
       const lines = existingCsv.split("\n");
-      for (let i = 1; i < lines.length; i++) {
+      for (let i = 1; i < lines.length; i++) { // Skip the header
         const id = lines[i].split(",")[0]?.trim();
         if (id) existingIds.add(id);
       }
@@ -187,7 +193,7 @@ async function discoverNewMemes(env, log) {
         ]);
       }).join("\n") + "\n";
       
-      const existingWithoutHeader = baseCsv.split("\n").slice(1).join("\n");
+      const existingWithoutHeader = baseCsv.split("\n").slice(1).join("\n"); // Ensure rows start from 2nd row
       const updatedCsv = newRows + existingWithoutHeader + "\n";
       
       await updateGitHubFile(env, "memes.csv", updatedCsv, log);
@@ -208,6 +214,128 @@ async function discoverNewMemes(env, log) {
     return [];
   }
 }
+
+function csvEscape(value) {
+  let s = String(value ?? "").trim();
+
+  if (s.startsWith('"') && s.endsWith('"') && s.length >= 2) {
+    const inner = s.slice(1, -1);
+    if (!inner.includes('"') || inner.includes('""')) {
+      s = inner.trim();
+    }
+  }
+
+  s = s.replace(/""/g, '"');
+
+  if (/[,\n\r"]/.test(s)) {
+    return `"${s.replace(/"/g, '""')}"`;
+  }
+
+  return s;
+}
+
+function csvLine(fields) {
+  return fields.map(csvEscape).join(",");
+}
+
+async function fetchGitHubFile(env, filename, log) {
+  const owner = env.GITHUB_OWNER;
+  const repo = env.GITHUB_REPO;
+  const token = env.GITHUB_TOKEN;
+
+  if (!owner || !repo || !token) {
+    log("WARN", `GitHub credentials missing for ${filename}`);
+    return "";
+  }
+
+  try {
+    const res = await fetch(
+      `https://api.github.com/repos/${owner}/${repo}/contents/${filename}`,
+      {
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "User-Agent": "Cloudflare-Worker",
+          Accept: "application/vnd.github.v3.raw"
+        }
+      }
+    );
+
+    if (!res.ok) {
+      if (res.status === 404) return "";
+      throw new Error(`GitHub fetch failed: ${res.status}`);
+    }
+
+    return await res.text();
+  } catch (err) {
+    log("ERROR", `Failed to fetch ${filename}`, { message: err.message });
+    return "";
+  }
+}
+
+async function updateGitHubFile(env, filename, content, log) {
+  const owner = env.GITHUB_OWNER;
+  const repo = env.GITHUB_REPO;
+  const token = env.GITHUB_TOKEN;
+
+  if (!owner || !repo || !token) {
+    log("WARN", `GitHub credentials missing for ${filename}`);
+    return;
+  }
+
+  try {
+    const getRes = await fetch(
+      `https://api.github.com/repos/${owner}/${repo}/contents/${filename}`,
+      {
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "User-Agent": "Cloudflare-Worker",
+          Accept: "application/vnd.github+json"
+        }
+      }
+    );
+
+    let sha = null;
+    if (getRes.ok) {
+      const fileData = await getRes.json();
+      sha = fileData.sha;
+    }
+
+    const putRes = await fetch(
+      `https://api.github.com/repos/${owner}/${repo}/contents/${filename}`,
+      {
+        method: "PUT",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+          "User-Agent": "Cloudflare-Worker",
+          Accept: "application/vnd.github+json"
+        },
+        body: JSON.stringify({
+          message: `Update ${filename} via Worker`,
+          content: utf8ToBase64(content),
+          sha
+        })
+      }
+    );
+
+    if (!putRes.ok) {
+      const error = await putRes.json();
+      log("ERROR", `GitHub upload failed for ${filename}`, { status: putRes.status, error });
+      return;
+    }
+
+    log("INFO", `Synced ${filename} to GitHub`);
+  } catch (err) {
+    log("ERROR", `Failed to update ${filename}`, { message: err.message });
+  }
+}
+
+const IMGFLIP_HEADERS = {
+  "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+  Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+  "Accept-Language": "en-US,en;q=0.9",
+  Referer: "https://imgflip.com/"
+};
 
 // Step 2: Enrich / fill (only last 2, skip upload if no changes)
 async function enrichItems(env, newItems, log) {
