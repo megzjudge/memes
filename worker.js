@@ -43,7 +43,9 @@ export default {
     }
 
     try {
-      const newItems = []; // Step 1 disabled
+      log("INFO", "Step 1: Discovering new memes");
+      const newItems = await discoverNewMemes(env, user, pass, log);
+      log("INFO", `✅ Step 1 Complete: ${newItems.length} rows added`);
 
       log("INFO", "Step 2: Enriching new items");
       const editedCount = await enrichItems(env, newItems, log);
@@ -194,16 +196,24 @@ async function enrichItems(env, newItems, log) {
       r.id = String(r.id || "").trim().replace(/^["']|["']$/g, "");
     });
     rows.sort((a, b) => b.id.localeCompare(a.id));
-
-    const recentRows = rows.slice(0, 2);
-    if (recentRows.length === 0) return 0;
-
-    log("INFO", `Enriching: ${recentRows.map(r => r.id).join(", ")}`);
+    
+    let targetRows;
+    
+    if (newItems && newItems.length > 0) {
+      const newIds = new Set(newItems.map(n => n.id));
+      targetRows = rows.filter(r => newIds.has(r.id)).slice(0, 5);
+    } else {
+      targetRows = rows.slice(0, 2);
+    }
+    
+    if (targetRows.length === 0) return 0;
+    
+    log("INFO", `Enriching: ${targetRows.map(r => r.id).join(", ")}`);
 
     let editedCount = 0;
     let hasChanges = false;
 
-    for (const row of recentRows) {
+    for (const row of targetRows) {
       const item = { id: row.id };
       const url = `https://imgflip.com/i/${item.id}`;
       log("DEBUG", `Scraping ${url}...`);
