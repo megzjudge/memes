@@ -260,14 +260,12 @@ async function scrapePage(url) {
 
     const html = await res.text();
 
-    // Extract the meme title (e.g., 'Distracted Boyfriend')
     const title = html.match(/<title>(.*?)<\/title>/i)?.[1]?.replace(" - Imgflip", "").trim() ?? "";
-
-    // Extract the image URL
     const imageUrl = html.match(/property="og:image" content="([^"]+)"/i)?.[1] ?? "";
-
-    // Extract tags from <a class='img-tag'>
+    
+    // Clean up tags to avoid raw HTML from <a> or <img> tags
     const tagMatches = [...html.matchAll(/href=['"]\/(tag|meme)\/([^'"]+)['"]/g)];
+    
     let memeType = "";
     const tagList = [];
 
@@ -277,18 +275,10 @@ async function scrapePage(url) {
         .trim()
         .replace(/[+-]/g, " ")
         .replace(/\s+/g, " ");
-    
+
       if (type === "meme") {
-        if (!memeType) {
-          memeType = name;
-        }
+        memeType = name;
       } else {
-        if (!memeType) {
-          const memeGeneratorMatch = html.match(/\/memegenerator\/([^\/]+)/i);
-          if (memeGeneratorMatch) {
-            memeType = memeGeneratorMatch[1].replace(/-/g, " ");
-          }
-        }
         tagList.push(name);
       }
     });
@@ -297,8 +287,7 @@ async function scrapePage(url) {
       tagList.unshift("memes");
     }
 
-    const tags = tagList.join(", ");
-    
+    const tags = tagList.join(", ").replace(/<[^>]*>/g, ""); // Remove HTML tags
     const kymSlug = html.match(/knowyourmeme\.com\/memes\/([^"\/]+)/i)?.[1] ?? "";
 
     return { title, imageUrl, tags, memeType, kymSlug };
@@ -309,9 +298,11 @@ async function scrapePage(url) {
 }
 
 function processTags(tags, memeType) {
-  const mbti = tags.filter(t => MBTI_SET.has(t.toUpperCase()));
+  const cleanTags = tags.map(t => t.replace(/<[^>]*>/g, "").trim());
+  
+  const mbti = cleanTags.filter(t => MBTI_SET.has(t.toUpperCase()));
   memeType = memeType || "";
-  const keywords = tags.filter(t => {
+  const keywords = cleanTags.filter(t => {
     if (MBTI_SET.has(t.toUpperCase())) return false;
     if (t === memeType) return false;
     return true;
