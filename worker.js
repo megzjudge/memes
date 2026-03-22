@@ -260,10 +260,14 @@ async function scrapePage(url) {
 
     const html = await res.text();
 
+    // Extract the meme title (e.g., 'Distracted Boyfriend')
     const title = html.match(/<title>(.*?)<\/title>/i)?.[1]?.replace(" - Imgflip", "").trim() ?? "";
-    const imageUrl = html.match(/property="og:image" content="([^"]+)"/i)?.[1] ?? "";
-    const tagMatches = [...html.matchAll(/href=['"]\/(tag|meme)\/([^'"]+)['"]/g)];
 
+    // Extract the image URL
+    const imageUrl = html.match(/property="og:image" content="([^"]+)"/i)?.[1] ?? "";
+
+    // Extract tags from <a class='img-tag'>
+    const tagMatches = [...html.matchAll(/href=['"]\/(tag|meme)\/([^'"]+)['"]/g)];
     let memeType = "";
     const tagList = [];
 
@@ -273,27 +277,28 @@ async function scrapePage(url) {
         .trim()
         .replace(/[+-]/g, " ")
         .replace(/\s+/g, " ");
-
+    
       if (type === "meme") {
-        memeType = name;
+        if (!memeType) {
+          memeType = name;
+        }
       } else {
+        if (!memeType) {
+          const memeGeneratorMatch = html.match(/\/memegenerator\/([^\/]+)/i);
+          if (memeGeneratorMatch) {
+            memeType = memeGeneratorMatch[1].replace(/-/g, " ");
+          }
+        }
         tagList.push(name);
       }
     });
 
-    // Check if the URL includes '/memegenerator/', and adjust accordingly
-    if (url.includes("/memegenerator/")) {
-      memeType = "memegenerator";  // Only mark it as 'memegenerator' for internal tracking, not as a tag or memeType
-      // Optionally, update URL for consistency
-      url = url.replace("/memegenerator/", "/meme/");
-    }
-
-    // Ensure 'memegenerator' doesn't go into tags
-    if (!tagList.includes("memegenerator") && !memeType.toLowerCase().includes("memegenerator")) {
-      tagList.unshift("memegenerator");
+    if (!tagList.includes("memes") && !memeType.toLowerCase().includes("meme")) {
+      tagList.unshift("memes");
     }
 
     const tags = tagList.join(", ");
+    
     const kymSlug = html.match(/knowyourmeme\.com\/memes\/([^"\/]+)/i)?.[1] ?? "";
 
     return { title, imageUrl, tags, memeType, kymSlug };
