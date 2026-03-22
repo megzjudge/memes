@@ -281,13 +281,16 @@ async function scrapePage(url) {
       }
     });
 
-    // Determine if the meme type needs fallback to /memegenerator/
-    if (!memeType) {
-      memeType = html.includes('/memegenerator/') ? "memegenerator" : "";
+    // Check if the URL includes '/memegenerator/', and adjust accordingly
+    if (url.includes("/memegenerator/")) {
+      memeType = "memegenerator";  // Only mark it as 'memegenerator' for internal tracking, not as a tag or memeType
+      // Optionally, update URL for consistency
+      url = url.replace("/memegenerator/", "/meme/");
     }
 
-    if (!tagList.includes("memes") && !memeType.toLowerCase().includes("meme")) {
-      tagList.unshift("memes");
+    // Ensure 'memegenerator' doesn't go into tags
+    if (!tagList.includes("memegenerator") && !memeType.toLowerCase().includes("memegenerator")) {
+      tagList.unshift("memegenerator");
     }
 
     const tags = tagList.join(", ");
@@ -298,20 +301,6 @@ async function scrapePage(url) {
     console.error(`scrapePage failed for ${url}:`, err.message);
     return { title: "", imageUrl: "", tags: "", memeType: "", kymSlug: "" };
   }
-}
-
-function processTags(tags, memeType) {
-  const mbti = tags.filter(t => MBTI_SET.has(t.toUpperCase()));
-  memeType = memeType || "";
-  const keywords = tags.filter(t => {
-    if (MBTI_SET.has(t.toUpperCase())) return false;
-    if (t === memeType) return false;
-    return true;
-  }).map(k => k.replace(/[+-]/g, " ").replace(/\s+/g, " "));
-
-  if (memeType && !keywords.includes(memeType)) keywords.unshift(memeType);
-
-  return { mbti, memeType, keywords };
 }
 
 // -----------------------
