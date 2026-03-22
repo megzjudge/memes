@@ -308,6 +308,20 @@ async function scrapePage(url) {
   }
 }
 
+function processTags(tags, memeType) {
+  const mbti = tags.filter(t => MBTI_SET.has(t.toUpperCase()));
+  memeType = memeType || "";
+  const keywords = tags.filter(t => {
+    if (MBTI_SET.has(t.toUpperCase())) return false;
+    if (t === memeType) return false;
+    return true;
+  }).map(k => k.replace(/[+-]/g, " ").replace(/\s+/g, " "));
+
+  if (memeType && !keywords.includes(memeType)) keywords.unshift(memeType);
+
+  return { mbti, memeType, keywords };
+}
+
 // -----------------------
 // View Count Helpers
 // -----------------------
