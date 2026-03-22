@@ -393,7 +393,7 @@ async function discoverNewMemes(env, log) {
     log("INFO", "Fetching memes page...");
 
     const pageRes = await fetch(
-      "https://imgflip.com/all/user-images/mbtininja?sort=latest&type=nsfw",
+      "https://imgflip.com/all/user-images/mbtininja?sort=latest&type=nsfw", // This ensures we fetch NSFW content
       { headers: { ...IMGFLIP_HEADERS, "Cookie": cookie } }
     );
 
@@ -422,24 +422,26 @@ async function discoverNewMemes(env, log) {
 
     log("DEBUG", `Found ${items.length} memes`);
 
+    // Fetch the existing CSV and separate header from data
     let existingCsv = await fetchGitHubFile(env, "memes.csv", log);
     const existingIds = new Set();
+    let header = "ID,URLS,IMAGE_URL,IS_GIF,TITLE,MEME_TYPE,KYM_SLUG,MBTI_TYPES,KEYWORDS,TAGS\n";
+    let rows = [];
+
     if (existingCsv) {
       const lines = existingCsv.split("\n");
-      for (let i = 1; i < lines.length; i++) {
-        const id = lines[i].split(",")[0]?.trim();
-        if (id) existingIds.add(id);
+      // Check if the header is already there (we assume the first line is the header)
+      if (lines.length > 1) {
+        rows = lines.slice(1); // All rows excluding the header
       }
     }
 
+    // Filter out any items already existing
     const trulyNew = items.filter(x => !existingIds.has(x.id));
     log("INFO", `Found ${trulyNew.length} new memes`);
 
     if (trulyNew.length > 0) {
-      // Ensure the header is preserved and the new rows are appended
-      let baseCsv = existingCsv ? existingCsv.trimEnd() : "ID,URLS,IMAGE_URL,IS_GIF,TITLE,MEME_TYPE,KYM_SLUG,MBTI_TYPES,KEYWORDS,TAGS\n";
-      
-      // Create the new rows and prepend them
+      // Create new rows without affecting the header
       let newRows = trulyNew.map(item => {
         const isGif = item.imageUrl.includes(".gif");
         return csvLine([
@@ -452,11 +454,10 @@ async function discoverNewMemes(env, log) {
         ]);
       }).join("\n");
 
-      // Ensure the CSV structure is maintained with header, new rows, and existing data
-      const existingWithoutHeader = baseCsv.split("\n").slice(1).join("\n");
-      const updatedCsv = newRows + "\n" + existingWithoutHeader;
+      // Add new rows to the existing ones (header already included in `header`)
+      const updatedCsv = header + newRows + "\n" + rows.join("\n");
 
-      // ✅ Fixed: only call updateGitHubFile once
+      // Update the CSV file with new rows
       await updateGitHubFile(env, "memes.csv", updatedCsv, log);
       log("INFO", `Added ${trulyNew.length} new rows at top`);
     }
