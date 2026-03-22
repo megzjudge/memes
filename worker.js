@@ -529,12 +529,19 @@ async function enrichItems(env, newItems, log) {
 
     let targetRows;
 
+    // If there are new items, filter by newIds
     if (newItems && newItems.length > 0) {
       const newIds = new Set(newItems.map(n => n.id));
       targetRows = rows.filter(r => newIds.has(r.id)).slice(0, 5);
     } else {
-      targetRows = rows.slice(0, 2);
+      targetRows = rows.slice(0, 2); // Default to the first 2 rows if no new items exist
     }
+
+    // Force enrichment on rows 2 and 3 (index 1 and 2)
+    const forcedRows = [rows[1], rows[2]].filter(Boolean); // Ensures we handle rows 2 and 3
+
+    // Combine the target rows and forced rows, ensuring no duplicates
+    targetRows = Array.from(new Set([...targetRows, ...forcedRows]));
 
     if (targetRows.length === 0) return 0;
 
