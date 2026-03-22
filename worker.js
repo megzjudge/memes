@@ -454,7 +454,7 @@ async function discoverNewMemes(env, log) {
 
     // Fetch the existing CSV and separate header from data
     let existingCsv = await fetchGitHubFile(env, "memes.csv", log);
-    const existingIds = new Set();
+    const existingIds = new Set();  // Set to store existing meme IDs
     let header = "ID,URLS,IMAGE_URL,IS_GIF,TITLE,MEME_TYPE,KYM_SLUG,MBTI_TYPES,KEYWORDS,TAGS\n";
     let rows = [];
 
@@ -463,6 +463,13 @@ async function discoverNewMemes(env, log) {
       // Check if the header is already there (we assume the first line is the header)
       if (lines.length > 1) {
         rows = lines.slice(1); // All rows excluding the header
+        // Populate the existingIds set with meme IDs from the CSV rows
+        rows.forEach(row => {
+          const rowData = row.split(",");
+          if (rowData.length > 0) {
+            existingIds.add(rowData[0].trim());  // Assuming the meme ID is in the first column
+          }
+        });
       }
     }
 
@@ -498,7 +505,7 @@ async function discoverNewMemes(env, log) {
     log("ERROR", "discoverNewMemes failed", err);
     await sendEmail(env, {
       subject: "❌ Imgflip Worker Error",
-      message: `Error during cookie test:\n\n${err.message}`
+      message: `Error during meme discovery:\n\n${err.message}`
     });
     return [];
   }
