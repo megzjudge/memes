@@ -1,4 +1,22 @@
 // worker.js
+
+//
+// 📧 EMAIL HELPER (Cloudflare Email Routing)
+// Place this near the top so all functions can use it
+//
+async function sendEmail(env, { subject, message }) {
+  try {
+    await env.EMAIL.send({
+      to: "fox@mbti.ninja",
+      from: "worker@mbti.ninja",
+      subject,
+      text: message
+    });
+  } catch (err) {
+    console.error("Email send failed:", err.message);
+  }
+}
+
 export default {
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
@@ -62,19 +80,55 @@ function utf8ToBase64(str) {
 }
 
 //
-// ✅ STEP 1
+// ✅ STEP 1: Discover New Memes (with cookie check and test email)
 //
 async function discoverNewMemes(env, log) {
   try {
     const cookie = env.IMGFLIP_COOKIE;
     if (!cookie) {
       log("ERROR", "Missing IMGFLIP_COOKIE");
+      await sendEmail(env, {
+        subject: "❌ Imgflip Cookie Missing",
+        message: "No IMGFLIP_COOKIE found in secrets — update immediately."
+      });
       return [];
     }
 
-    log("DEBUG", "Fetching memes page with auth cookie...");
+    log("DEBUG", "Testing Imgflip cookie...");
 
-    const res = await fetch(
+    const res = await fetch("https://imgflip.com/", {
+      headers: {
+        ...IMGFLIP_HEADERS,
+        "Cookie": cookie
+      }
+    });
+
+    const html = await res.text();
+
+    const isLoggedIn =
+      html.includes("/logout") ||
+      html.includes("u-menu") ||
+      html.includes("rootkey");
+
+    if (!isLoggedIn) {
+      log("ERROR", "Cookie appears to be expired or invalid");
+      await sendEmail(env, {
+        subject: "❌ Imgflip Cookie Expired",
+        message: "Your Imgflip cookie is no longer valid. Please refresh it."
+      });
+      return [];
+    }
+
+    log("INFO", "✅ Cookie is valid — sending test email");
+    await sendEmail(env, {
+      subject: "✅ Imgflip Cookie OK",
+      message: "Cookie is working and authenticated successfully."
+    });
+
+    // Continue scraping memes
+    log("INFO", "Fetching memes page...");
+
+    const pageRes = await fetch(
       "https://imgflip.com/all/user-images/mbtininja?sort=latest",
       {
         headers: {
@@ -84,20 +138,18 @@ async function discoverNewMemes(env, log) {
       }
     );
 
-    const html = await res.text();
-    log("DEBUG", `Fetched ${html.length} bytes`);
+    const pageHtml = await pageRes.text();
+    log("DEBUG", `Memes page fetched (${pageHtml.length} bytes)`);
 
     const items = [];
     const seen = new Set();
-
     const regex =
       /href\s*=\s*["']?\/(i|gif)\/([a-z0-9]{6,8})["'][^>]*>[\s\S]*?<img[^>]+src=["']([^"']+)["']/gi;
 
     let match;
-    while ((match = regex.exec(html)) !== null) {
+    while ((match = regex.exec(pageHtml)) !== null) {
       const id = match[2];
       const imageUrl = match[3];
-
       if (!seen.has(id)) {
         seen.add(id);
         items.push({ id, imageUrl });
@@ -106,9 +158,9 @@ async function discoverNewMemes(env, log) {
 
     log("DEBUG", `Found ${items.length} memes`);
 
+    // Existing CSV fetch/update
     let existingCsv = await fetchGitHubFile(env, "memes.csv", log);
     const existingIds = new Set();
-
     if (existingCsv) {
       const lines = existingCsv.split("\n");
       for (let i = 1; i < lines.length; i++) {
@@ -145,6 +197,10 @@ async function discoverNewMemes(env, log) {
 
   } catch (err) {
     log("ERROR", "discoverNewMemes failed", err);
+    await sendEmail(env, {
+      subject: "❌ Imgflip Worker Error",
+      message: `Error during cookie test:\n\n${err.message}`
+    });
     return [];
   }
 }
