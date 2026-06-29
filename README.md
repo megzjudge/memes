@@ -4,7 +4,7 @@ A browseable collection of MBTI-themed memes hosted at [memes.mbti.ninja](https:
 
 ## What it does
 
-- Serves ~350+ MBTI personality-type memes sourced from [@mbtininja on Imgflip](https://imgflip.com/all/user-images/mbtininja?sort=latest)
+- Serves 350+ MBTI personality-type memes sourced from [@mbtininja on Imgflip](https://imgflip.com/all/user-images/mbtininja?sort=latest)
 - Lets visitors filter memes by MBTI type, meme type, and keywords
 - Tracks view counts via a Cloudflare Worker
 - Runs a nightly cron job (via Cloudflare Workers scheduled triggers) to automatically sync new memes from Imgflip into `memes.csv`
