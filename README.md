@@ -14,7 +14,7 @@ The Worker runs on a nightly cron (`0 21 * * *`) and does three things in sequen
 
 The Worker also emails via SendGrid if the Imgflip session cookie expires, and exposes a `/run` endpoint to trigger the pipeline manually.
 
-> I chose .csvs because of easy downloadability and portability for external viewing, rather than a D1/K2/.json substructure for this case.
+> I chose .csvs because of easy downloadability and portability for external viewing, rather than a D1/K2/.json substructure in this specific website case.
 
 ## Frontend
 
