@@ -14,6 +14,8 @@ The Worker runs on a nightly cron (`0 21 * * *`) and does three things in sequen
 
 The Worker also emails via SendGrid if the Imgflip session cookie expires, and exposes a `/run` endpoint to trigger the pipeline manually.
 
+I chose .csvs because of easy downloadability and portability for external viewing, rather than a D1/K2/.json substructure in this case.
+
 ## Frontend
 
 The site is plain HTML + vanilla JS — no framework, no build step. On load it fetches both CSVs in parallel, merges them, and renders the meme grid. Filters for MBTI type, meme type, and keyword are built dynamically from the data; button size and colour are log-scaled by frequency so the most-used tags stand out visually. Sort by newest/oldest or by views.
