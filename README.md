@@ -34,21 +34,6 @@ memes/
 └── images/           # Icons and SVGs
 ```
 
-## Running locally
-
-```bash
-npm install
-npx wrangler dev
-```
-
-Requires a [Cloudflare account](https://dash.cloudflare.com/) and `wrangler` CLI for the Worker features. The static site itself runs without any dependencies.
-
-## Deploying
-
-```bash
-npx wrangler deploy
-```
-
 ## License
 
 See [LICENSE](LICENSE).
