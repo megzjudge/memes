@@ -43,7 +43,3 @@ The Worker expects these secrets set in Cloudflare (`wrangler secret put <NAME>`
 | `GITHUB_TOKEN` | Personal access token with `contents: write` |
 | `ROUTING_EMAIL` | Address for SendGrid alert emails |
 | `ROUTING_EMAIL_API` | SendGrid API key |
-
-## License
-
-See [LICENSE](LICENSE).
