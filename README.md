@@ -33,7 +33,7 @@ The site is plain HTML + vanilla JS — no framework, no build step. On load it 
 - **Email alerts:** SendGrid (cookie expiry notifications)
 - **Frontend:** Vanilla HTML / CSS / JS
 
-The Worker expects these secrets set in Cloudflare (`wrangler secret put <NAME>`):
+The Worker expects these secrets set in Cloudflare:
 
 | Secret | Purpose |
 |---|---|
